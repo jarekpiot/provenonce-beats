@@ -130,7 +130,7 @@ export async function readLatestAnchor(): Promise<
         best = {
           beat_index: parsed.beat_index,
           hash: parsed.hash,
-          prev: parsed.prev,
+          prev_hash: parsed.prev,
           utc: parsed.utc,
           difficulty: parsed.difficulty,
           epoch: parsed.epoch,

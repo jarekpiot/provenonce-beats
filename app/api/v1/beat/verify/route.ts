@@ -138,6 +138,7 @@ export async function POST(req: NextRequest) {
             prev: check.prev,
             timestamp: check.timestamp || 0,
             nonce: check.nonce,
+            anchor_hash: proof.anchor_hash,
           };
 
           const valid = verifyBeat(beatToVerify, difficulty);

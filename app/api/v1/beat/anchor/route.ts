@@ -29,7 +29,7 @@ export async function GET() {
       anchor: {
         beat_index: latest.beat_index,
         hash: latest.hash,
-        prev: latest.prev,
+        prev_hash: latest.prev_hash,
         utc: latest.utc,
         difficulty: latest.difficulty,
         epoch: latest.epoch,

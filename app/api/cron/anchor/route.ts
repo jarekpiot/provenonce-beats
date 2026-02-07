@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     const prevAnchor: GlobalAnchor | null = latest ? {
       beat_index: latest.beat_index,
       hash: latest.hash,
-      prev: latest.prev,
+      prev_hash: latest.prev_hash,
       utc: latest.utc,
       difficulty: latest.difficulty,
       epoch: latest.epoch,
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       type: 'anchor',
       beat_index: newAnchor.beat_index,
       hash: newAnchor.hash,
-      prev: newAnchor.prev,
+      prev: newAnchor.prev_hash,
       utc: newAnchor.utc,
       difficulty: newAnchor.difficulty,
       epoch: newAnchor.epoch,

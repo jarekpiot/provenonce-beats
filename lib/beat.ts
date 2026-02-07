@@ -17,13 +17,14 @@ export interface Beat {
   prev: string;             // Previous beat's hash (chain link)
   timestamp: number;        // Wall-clock time when computed (informational, not authoritative)
   nonce?: string;           // Optional entropy (for global anchors)
+  anchor_hash?: string;     // Global anchor hash woven into VDF seed (anti-pre-computation)
 }
 
 /** Global Beat Anchor — broadcast by the registry */
 export interface GlobalAnchor {
   beat_index: number;       // Which global beat this is
   hash: string;             // The anchor hash
-  prev: string;             // Previous anchor hash
+  prev_hash: string;        // Previous anchor hash
   utc: number;              // UTC timestamp for legal alignment
   difficulty: number;       // Current VDF difficulty (hash iterations per beat)
   epoch: number;            // Epoch number (difficulty adjustment period)
@@ -50,6 +51,7 @@ export interface BeatProof {
   to_hash: string;          // Hash at to_beat
   beats_computed: number;   // Number of beats in this window
   global_anchor: number;    // Global beat index being synced to
+  anchor_hash?: string;     // Global anchor hash used for all beats in this window
   // Spot-check: registry can verify any beat in the chain
   // prev is required for VDF recomputation verification
   spot_checks?: { index: number; hash: string; prev: string; nonce?: string }[];
@@ -72,9 +74,9 @@ export const BEAT_GENESIS_SEED = 'provenonce:beat:genesis:v1:2026';
 /** Default difficulty: hash iterations per beat */
 export const DEFAULT_DIFFICULTY = 1000;
 
-/** 
- * Minimum difficulty — even at minimum, each beat requires 
- * sequential hashing that can't be parallelized 
+/**
+ * Minimum difficulty — even at minimum, each beat requires
+ * sequential hashing that can't be parallelized
  */
 export const MIN_DIFFICULTY = 100;
 
@@ -86,6 +88,12 @@ export const GLOBAL_ANCHOR_INTERVAL_SEC = 60; // 1 minute
 
 /** Check-in deadline — agents must check in within N global anchors */
 export const CHECKIN_DEADLINE_ANCHORS = 60; // ~1 hour at 1-min anchors
+
+/** Epoch length — difficulty adjusts every N global anchors */
+export const EPOCH_LENGTH = 100; // ~100 minutes at 1-min anchors
+
+/** Anchor hash grace window — how many recent anchors are valid for beat computation */
+export const ANCHOR_HASH_GRACE_WINDOW = 5; // ~5 min at 1-min anchors
 
 /** Base gestation cost — beats required to spawn one child agent */
 export const BASE_GESTATION_BEATS = 1_000;
@@ -100,12 +108,12 @@ export const MAX_SPAWNS_PER_WINDOW = 10;
 
 /**
  * Compute a single VDF Beat.
- * 
+ *
  * This is the core primitive — a sequential SHA-256 hash chain.
  * Each "beat" requires `difficulty` sequential hash operations.
- * Because SHA-256 is inherently sequential (output of hash N 
+ * Because SHA-256 is inherently sequential (output of hash N
  * is the input to hash N+1), this cannot be parallelized.
- * 
+ *
  * This is the "physically unskippable amount of CPU work" that
  * proves an agent has "lived" through a specific time window.
  */
@@ -114,12 +122,18 @@ export function computeBeat(
   beatIndex: number,
   difficulty: number = DEFAULT_DIFFICULTY,
   nonce?: string,
+  anchorHash?: string,
 ): Beat {
   const timestamp = Date.now();
-  
-  // Seed: previous hash + beat index + optional nonce
+
+  // Seed: previous hash + beat index + optional nonce + optional anchor hash
+  // Anchor hash weaving binds beats to the global clock, preventing pre-computation
+  const seed = anchorHash
+    ? `${prevHash}:${beatIndex}:${nonce || ''}:${anchorHash}`
+    : `${prevHash}:${beatIndex}:${nonce || ''}`;
+
   let current = createHash('sha256')
-    .update(`${prevHash}:${beatIndex}:${nonce || ''}`)
+    .update(seed)
     .digest('hex');
 
   // Sequential VDF: hash `difficulty` times
@@ -135,13 +149,14 @@ export function computeBeat(
     prev: prevHash,
     timestamp,
     nonce,
+    anchor_hash: anchorHash,
   };
 }
 
 /**
  * Verify a Beat by recomputing the VDF chain.
  * Returns true if the beat hash matches the expected output.
- * 
+ *
  * This is the key property: verification costs the same as computation.
  * No shortcuts, no acceleration — the verifier must walk the same chain.
  */
@@ -149,7 +164,7 @@ export function verifyBeat(
   beat: Beat,
   difficulty: number = DEFAULT_DIFFICULTY,
 ): boolean {
-  const recomputed = computeBeat(beat.prev, beat.index, difficulty, beat.nonce);
+  const recomputed = computeBeat(beat.prev, beat.index, difficulty, beat.nonce, beat.anchor_hash);
   return recomputed.hash === beat.hash;
 }
 
@@ -162,16 +177,17 @@ export function computeBeats(
   startIndex: number,
   count: number,
   difficulty: number = DEFAULT_DIFFICULTY,
+  anchorHash?: string,
 ): Beat[] {
   const beats: Beat[] = [];
   let prevHash = startHash;
-  
+
   for (let i = 0; i < count; i++) {
-    const beat = computeBeat(prevHash, startIndex + i, difficulty);
+    const beat = computeBeat(prevHash, startIndex + i, difficulty, undefined, anchorHash);
     beats.push(beat);
     prevHash = beat.hash;
   }
-  
+
   return beats;
 }
 
@@ -189,11 +205,11 @@ export function verifyBeatChain(
 
   const failed: number[] = [];
   const toCheck = new Set<number>();
-  
+
   // Always check first and last
   toCheck.add(0);
   toCheck.add(beats.length - 1);
-  
+
   // Random spot checks
   for (let i = 0; i < spotCheckCount && toCheck.size < beats.length; i++) {
     toCheck.add(Math.floor(Math.random() * beats.length));
@@ -230,7 +246,7 @@ export function verifyBeatChain(
 export function createGenesisBeat(agentHash: string): Beat {
   const genesisInput = `${BEAT_GENESIS_SEED}:${agentHash}`;
   const genesisHash = createHash('sha256').update(genesisInput).digest('hex');
-  
+
   return {
     index: 0,
     hash: genesisHash,
@@ -254,7 +270,7 @@ export function createGlobalAnchor(
   const index = prevAnchor ? prevAnchor.beat_index + 1 : 0;
   const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_SEED).digest('hex');
   const utc = Date.now();
-  
+
   // Anchor nonce includes UTC for legal binding
   const nonce = `anchor:${utc}:${epoch}`;
   const beat = computeBeat(prevHash, index, difficulty, nonce);
@@ -262,7 +278,7 @@ export function createGlobalAnchor(
   return {
     beat_index: index,
     hash: beat.hash,
-    prev: prevHash,
+    prev_hash: prevHash,
     utc,
     difficulty,
     epoch,
@@ -274,7 +290,7 @@ export function createGlobalAnchor(
  */
 export function verifyGlobalAnchor(anchor: GlobalAnchor): boolean {
   const nonce = `anchor:${anchor.utc}:${anchor.epoch}`;
-  const beat = computeBeat(anchor.prev, anchor.beat_index, anchor.difficulty, nonce);
+  const beat = computeBeat(anchor.prev_hash, anchor.beat_index, anchor.difficulty, nonce);
   return beat.hash === anchor.hash;
 }
 
@@ -282,7 +298,7 @@ export function verifyGlobalAnchor(anchor: GlobalAnchor): boolean {
 
 /**
  * Calculate the gestation requirement for spawning a child agent.
- * 
+ *
  * "An agent cannot simply 'spawn' 1,000 sub-agents instantly;
  *  it must prove it has expended the Beats (CPU cycles) required
  *  to 'birth' them."
@@ -295,10 +311,10 @@ export function calculateGestationCost(
   const depthCost = Math.floor(
     BASE_GESTATION_BEATS * Math.pow(GESTATION_DEPTH_MULTIPLIER, parentDepth)
   );
-  
+
   // Exponential backoff: each additional child costs more
   const spawnCost = Math.floor(depthCost * Math.pow(1.2, childrenAlreadySpawned));
-  
+
   return spawnCost;
 }
 
@@ -311,7 +327,7 @@ export function checkGestationEligibility(
   childrenSpawned: number,
 ): GestationRequirement & { parent_hash: string } {
   const required = calculateGestationCost(parentDepth, childrenSpawned);
-  
+
   return {
     parent_hash: '', // Filled in by caller
     required_beats: required,
@@ -325,8 +341,8 @@ export function checkGestationEligibility(
 
 /**
  * Create a check-in proof for the registry.
- * 
- * "To remain on the Whitelist, an agent must periodically 
+ *
+ * "To remain on the Whitelist, an agent must periodically
  *  submit a proof of its Local Beats to the Registry."
  */
 export function createCheckinProof(
@@ -339,7 +355,7 @@ export function createCheckinProof(
 ): BeatProof {
   // Select beats within the proof window
   const windowBeats = chain.filter(b => b.index >= fromBeat && b.index <= toBeat);
-  
+
   if (windowBeats.length === 0) {
     throw new Error(`No beats found in range [${fromBeat}, ${toBeat}]`);
   }
@@ -370,11 +386,11 @@ export function createCheckinProof(
 
 /**
  * Verify a check-in proof.
- * 
+ *
  * The registry verifies:
  *   1. Structural consistency (beat count, forward progression)
  *   2. Spot-check VDF recomputation (recompute hashes to confirm work was done)
- * 
+ *
  * This is the real verification — not just structure checks,
  * but actual SHA-256 chain recomputation on spot-checked beats.
  */
@@ -436,6 +452,7 @@ export function verifyCheckinProof(
       prev: check.prev,
       timestamp: 0,
       nonce: check.nonce,
+      anchor_hash: proof.anchor_hash,
     };
 
     if (!verifyBeat(beatToVerify, difficulty)) {
@@ -454,9 +471,9 @@ export function verifyCheckinProof(
 
 /**
  * Generate a Re-Sync Challenge for an agent that went offline.
- * 
+ *
  * "When an agent powers down, its time 'freezes.' Upon waking,
- *  it must perform a Re-Sync Challenge with the Registry to fill 
+ *  it must perform a Re-Sync Challenge with the Registry to fill
  *  the 'Temporal Gap' and re-establish its provenance."
  */
 export function createResyncChallenge(
@@ -473,7 +490,7 @@ export function createResyncChallenge(
   // The agent must compute `gapBeats` to fill the temporal gap
   // Plus a penalty based on how long they were offline
   const penalty = Math.floor(gapBeats * 0.1); // 10% penalty
-  
+
   // Challenge nonce prevents replay attacks
   const challengeNonce = createHash('sha256')
     .update(`resync:${agentHash}:${lastKnownBeat.hash}:${currentGlobalAnchor.hash}:${Date.now()}`)
@@ -501,12 +518,12 @@ export function adjustDifficulty(
   targetTimeMs: number,   // How long it should have taken
 ): number {
   const ratio = targetTimeMs / actualTimeMs;
-  
+
   // Clamp adjustment to 4x in either direction (prevents wild swings)
   const clampedRatio = Math.max(0.25, Math.min(4.0, ratio));
-  
+
   const newDifficulty = Math.floor(currentDifficulty * clampedRatio);
-  
+
   return Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, newDifficulty));
 }
 
