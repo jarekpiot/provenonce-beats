@@ -11,9 +11,21 @@ Beats is the stateless time verification layer for Provenonce. It has **zero dat
 
 This service is intentionally minimal. It can be replaced, scaled, or forked without affecting agent state. The Registry service (separate repo) handles identity, accountability, and agent lifecycle.
 
-**Repo**: `jarekpiot/provenonce-beats`
-**Deployment**: https://beats-jet.vercel.app
-**Registry**: https://provenonce.vercel.app (separate repo: `jarekpiot/provenonce`)
+## Repo Layout
+
+Registry and Beats are **separate repos with no shared remotes**:
+
+| Service | Local Path | GitHub | Vercel |
+|---------|-----------|--------|--------|
+| Beats (this repo) | `/c/provenonce-beats` | `jarekpiot/provenonce-beats` | `beats-jet.vercel.app` |
+| Registry | `/c/provenance-app2` | `jarekpiot/provenonce` | `provenance-app2.vercel.app` |
+
+**Rules:**
+- Always `cd` and `pwd` before any git operation. State which service you're modifying.
+- Beats changes: `cd /c/provenonce-beats`
+- Registry changes: `cd /c/provenance-app2`
+- NEVER push to the wrong repo.
+- `lib/beat.ts` is duplicated in both repos — must sync manually on VDF changes.
 
 ## Architecture
 
@@ -40,7 +52,7 @@ Beats Service (this repo)
 | `lib/rate-limit.ts` | In-memory rate limiter. Verify: 10/min, Anchor read: 30/min. |
 | `app/api/v1/beat/verify/route.ts` | Accepts a `BeatProof`, runs `verifyCheckinProof()`, returns pass/fail. No auth required. |
 | `app/api/v1/beat/anchor/route.ts` | Reads the latest global anchor from Solana memos. Returns anchor data + on-chain tx signature. |
-| `app/api/cron/anchor/route.ts` | Cron endpoint (daily). Creates next global anchor, writes memo to Solana. Protected by `CRON_SECRET`. |
+| `app/api/cron/anchor/route.ts` | Cron endpoint (every minute, Vercel Pro). Creates next global anchor, writes memo to Solana. Protected by `CRON_SECRET`. |
 | `app/api/health/route.ts` | Returns `{ ok: true }`. Used by monitoring. |
 
 ## Environment Variables
@@ -61,7 +73,7 @@ Beats Service (this repo)
 5. Returns `{ valid: true/false }`
 
 ### Anchor Flow
-1. Vercel cron triggers `GET /api/cron/anchor` daily
+1. Vercel cron triggers `GET /api/cron/anchor` every minute
 2. Reads the latest anchor memo from Solana
 3. Computes the next anchor using `createGlobalAnchor()`
 4. Writes the new anchor as an SPL Memo transaction
@@ -84,7 +96,7 @@ Anchors are stored as JSON memo text on Solana transactions:
 ## Conventions
 
 - **Zero database**: All state comes from Solana. No Supabase.
-- **Pure math**: `lib/beat.ts` has zero imports from other modules.
+- **Pure math**: `lib/beat.ts` has no project imports — only Node.js built-in `crypto`.
 - **Naming**: Same conventions as Registry (see Registry CLAUDE.md).
 - **Commit style**: Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`).
 
@@ -92,7 +104,6 @@ Anchors are stored as JSON memo text on Solana transactions:
 
 | Issue | Notes |
 |-------|-------|
-| Daily cron (not per-minute) | Vercel Hobby plan limit. Registry monolith still runs per-minute anchors as supplement. Upgrade to Pro for minute-level. |
 | `lib/beat.ts` must stay in sync | This file is duplicated from the Registry. Any VDF changes must be applied to both. Consider publishing as a shared npm package. |
 | In-memory rate limiting | Resets on each Vercel cold start. Acceptable for current scale. |
 | No custom domain | Using default `beats-jet.vercel.app`. Custom domain deferred. |
