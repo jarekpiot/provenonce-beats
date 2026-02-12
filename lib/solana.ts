@@ -4,7 +4,6 @@ import {
   PublicKey,
   Transaction,
   TransactionInstruction,
-  sendAndConfirmTransaction,
 } from '@solana/web3.js';
 import bs58 from 'bs58';
 import type { GlobalAnchor } from './beat';
@@ -21,7 +20,13 @@ let _connection: Connection | null = null;
 export function getConnection(): Connection {
   if (!_connection) {
     console.log(`[Beats] Creating Solana connection to ${SOLANA_CLUSTER}`, { rpcUrl: SOLANA_RPC_URL });
-    _connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+    // Pass cache: 'no-store' to prevent Next.js from caching RPC responses.
+    // Without this, confirmation polling gets cached results and never sees
+    // the confirmed status — same issue as Registry's db-client.ts (Sprint 8).
+    _connection = new Connection(SOLANA_RPC_URL, {
+      commitment: 'confirmed',
+      fetch: (input: any, init?: any) => fetch(input, { ...init, cache: 'no-store' }),
+    });
   }
   return _connection;
 }
@@ -34,6 +39,43 @@ function getAnchorKeypair(): Keypair {
 
 export function getAnchorAddress(): string {
   return getAnchorKeypair().publicKey.toBase58();
+}
+
+// ============ TX HELPERS ============
+
+/**
+ * Send a transaction and poll for confirmation via HTTP only.
+ * Avoids WebSocket subscriptions which fail on Vercel serverless.
+ */
+async function sendAndConfirmTx(
+  connection: Connection,
+  tx: Transaction,
+  signers: Keypair[],
+  timeoutMs = 60_000,
+  pollIntervalMs = 2_000,
+): Promise<string> {
+  tx.sign(...signers);
+  const rawTx = tx.serialize();
+  const signature = await connection.sendRawTransaction(rawTx, {
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+  });
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const resp = await connection.getSignatureStatuses([signature]);
+    const status = resp?.value?.[0];
+    if (status) {
+      if (status.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+      }
+      if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
+        return signature;
+      }
+    }
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+  }
+  throw new Error(`Transaction confirmation timeout after ${timeoutMs}ms`);
 }
 
 // ============ ANCHOR MEMO FORMAT ============
@@ -81,7 +123,8 @@ export async function sendAnchorMemo(
     })
   );
 
-  const signature = await sendAndConfirmTransaction(connection, tx, [anchorWallet]);
+  // HTTP polling only — no WebSocket on Vercel serverless
+  const signature = await sendAndConfirmTx(connection, tx, [anchorWallet]);
 
   const txInfo = await connection.getTransaction(signature, {
     maxSupportedTransactionVersion: 0,
