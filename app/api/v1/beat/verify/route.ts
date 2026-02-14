@@ -8,6 +8,7 @@ import {
   type Beat,
 } from '@/lib/beat';
 import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
+import { validateProofSpotChecks } from '@/lib/proof-verify';
 
 const limiter = new RateLimiter({ maxRequests: 10, windowMs: 60 * 1000 });
 
@@ -121,30 +122,38 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      const spotCheckValidation = validateProofSpotChecks(proof);
+      if (!spotCheckValidation.valid) {
+        return NextResponse.json({
+          ok: true,
+          mode: 'proof',
+          valid: false,
+          reason: spotCheckValidation.reason,
+        });
+      }
+
       const spotResults: { index: number; valid: boolean }[] = [];
       let allValid = true;
 
-      if (proof.spot_checks && Array.isArray(proof.spot_checks)) {
-        for (const check of proof.spot_checks) {
-          if (!check.hash || !check.prev || typeof check.index !== 'number') {
-            spotResults.push({ index: check.index || -1, valid: false });
-            allValid = false;
-            continue;
-          }
-
-          const beatToVerify: Beat = {
-            index: check.index,
-            hash: check.hash,
-            prev: check.prev,
-            timestamp: check.timestamp || 0,
-            nonce: check.nonce,
-            anchor_hash: proof.anchor_hash,
-          };
-
-          const valid = verifyBeat(beatToVerify, difficulty);
-          spotResults.push({ index: check.index, valid });
-          if (!valid) allValid = false;
+      for (const check of proof.spot_checks) {
+        if (!check.hash || !check.prev || typeof check.index !== 'number') {
+          spotResults.push({ index: check.index || -1, valid: false });
+          allValid = false;
+          continue;
         }
+
+        const beatToVerify: Beat = {
+          index: check.index,
+          hash: check.hash,
+          prev: check.prev,
+          timestamp: check.timestamp || 0,
+          nonce: check.nonce,
+          anchor_hash: proof.anchor_hash,
+        };
+
+        const valid = verifyBeat(beatToVerify, difficulty);
+        spotResults.push({ index: check.index, valid });
+        if (!valid) allValid = false;
       }
 
       return NextResponse.json({
