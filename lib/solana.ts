@@ -7,6 +7,7 @@ import {
 } from '@solana/web3.js';
 import bs58 from 'bs58';
 import type { GlobalAnchor } from './beat';
+import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
 
 // ============ CONFIG ============
 
@@ -153,40 +154,25 @@ export async function readLatestAnchor(): Promise<
     { limit: 50 }
   );
 
-  let best: (GlobalAnchor & { tx_signature: string }) | null = null;
+  const candidates: Array<GlobalAnchor & { tx_signature: string }> = [];
 
   for (const sig of signatures) {
     if (!sig.memo) continue;
-
-    try {
-      // Solana prefixes memo with "[length] " — strip it
-      let memoStr = sig.memo;
-      const bracketEnd = memoStr.indexOf('] ');
-      if (bracketEnd !== -1 && memoStr.startsWith('[')) {
-        memoStr = memoStr.slice(bracketEnd + 2);
-      }
-
-      const parsed = JSON.parse(memoStr) as AnchorMemoData;
-      if (parsed.v !== 1 || parsed.type !== 'anchor') continue;
-
-      if (!best || parsed.beat_index > best.beat_index) {
-        best = {
-          beat_index: parsed.beat_index,
-          hash: parsed.hash,
-          prev_hash: parsed.prev,
-          utc: parsed.utc,
-          difficulty: parsed.difficulty,
-          epoch: parsed.epoch,
-          signature: sig.signature,
-          tx_signature: sig.signature,
-        };
-      }
-    } catch {
-      // Not JSON or not an anchor — skip
-    }
+    const parsed = parseAnchorMemo(sig.memo);
+    if (!parsed) continue;
+    candidates.push({
+      beat_index: parsed.beat_index,
+      hash: parsed.hash,
+      prev_hash: parsed.prev_hash,
+      utc: parsed.utc,
+      difficulty: parsed.difficulty,
+      epoch: parsed.epoch,
+      signature: sig.signature,
+      tx_signature: sig.signature,
+    });
   }
 
-  return best;
+  return selectCanonicalAnchor(candidates);
 }
 
 export function getExplorerUrl(signature: string): string {
