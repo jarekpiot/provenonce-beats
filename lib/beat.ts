@@ -210,9 +210,27 @@ export function verifyBeatChain(
   toCheck.add(0);
   toCheck.add(beats.length - 1);
 
-  // Random spot checks
-  for (let i = 0; i < spotCheckCount && toCheck.size < beats.length; i++) {
-    toCheck.add(Math.floor(Math.random() * beats.length));
+  // Deterministic spot checks (anti-retry):
+  // Public endpoints should not use random sampling that a prover can retry until it passes.
+  // Derive pseudo-random indices from immutable chain features so selection is stable per input.
+  const wanted = Math.max(0, Math.min(Math.floor(spotCheckCount), beats.length));
+  if (wanted > toCheck.size) {
+    const first = beats[0]?.hash || '';
+    const last = beats[beats.length - 1]?.hash || '';
+    let material = `${beats.length}:${difficulty}:${first}:${last}`;
+    // Add some evenly-spaced deterministic points to reduce "hide faults in gaps".
+    if (beats.length >= 4) {
+      toCheck.add(Math.floor(beats.length / 2));
+    }
+    if (beats.length >= 8) {
+      toCheck.add(Math.floor(beats.length / 4));
+      toCheck.add(Math.floor((3 * beats.length) / 4));
+    }
+    while (toCheck.size < wanted) {
+      material = createHash('sha256').update(material).digest('hex');
+      const idx = parseInt(material.slice(0, 8), 16) % beats.length;
+      toCheck.add(idx);
+    }
   }
 
   // Verify chain linkage (prev hash matches)
@@ -364,6 +382,13 @@ export function createCheckinProof(
   // prev and nonce are required for VDF recomputation on the verifier side
   const spotChecks: { index: number; hash: string; prev: string; nonce?: string }[] = [];
   const available = windowBeats.filter(b => b.index > fromBeat && b.index < toBeat);
+
+  // Always include the endpoint beat so `to_hash` is actually verified by recomputation.
+  // (Verifier requires this; see verifyCheckinProof M-4 fix.)
+  const end = windowBeats[windowBeats.length - 1];
+  if (end && end.index === toBeat) {
+    spotChecks.push({ index: end.index, hash: end.hash, prev: end.prev, nonce: end.nonce });
+  }
 
   for (let i = 0; i < Math.min(spotCheckCount, available.length); i++) {
     const idx = Math.floor(Math.random() * available.length);

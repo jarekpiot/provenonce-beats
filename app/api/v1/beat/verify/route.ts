@@ -12,6 +12,10 @@ import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
 
 const limiter = new RateLimiter({ maxRequests: 10, windowMs: 60 * 1000 });
 
+// Public verifier cost-guards: keep worst-case compute bounded for serverless.
+const PUBLIC_MAX_DIFFICULTY = 5000;
+const PUBLIC_MAX_SPOT_CHECKS = 25;
+
 /**
  * POST /api/v1/beat/verify
  *
@@ -30,9 +34,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const mode = body.mode || 'beat';
+    const requestedDifficultyRaw = Number(body.difficulty ?? DEFAULT_DIFFICULTY);
+    const requestedDifficulty = Number.isFinite(requestedDifficultyRaw) ? requestedDifficultyRaw : DEFAULT_DIFFICULTY;
     const difficulty = Math.min(
-      Math.max(body.difficulty || DEFAULT_DIFFICULTY, MIN_DIFFICULTY),
-      MAX_DIFFICULTY
+      Math.max(requestedDifficulty, MIN_DIFFICULTY),
+      Math.min(MAX_DIFFICULTY, PUBLIC_MAX_DIFFICULTY),
     );
 
     if (mode === 'beat') {
@@ -61,7 +67,11 @@ export async function POST(req: NextRequest) {
 
     if (mode === 'chain') {
       const beats: Beat[] = body.beats;
-      const spotChecks = body.spot_checks || 3;
+      const requestedSpotChecks = Number(body.spot_checks ?? 3);
+      const spotChecks = Math.min(
+        Math.max(Number.isFinite(requestedSpotChecks) ? Math.floor(requestedSpotChecks) : 3, 0),
+        PUBLIC_MAX_SPOT_CHECKS,
+      );
 
       if (!beats || !Array.isArray(beats) || beats.length === 0) {
         return NextResponse.json({
@@ -98,6 +108,13 @@ export async function POST(req: NextRequest) {
       if (!proof || typeof proof.from_beat !== 'number' || !proof.to_beat || !proof.from_hash || !proof.to_hash) {
         return NextResponse.json({
           error: 'Missing proof fields: from_beat, to_beat, from_hash, to_hash required',
+        }, { status: 400 });
+      }
+
+      const providedSpotChecks = proof.spot_checks?.length ?? 0;
+      if (providedSpotChecks > PUBLIC_MAX_SPOT_CHECKS) {
+        return NextResponse.json({
+          error: `Too many spot checks (max ${PUBLIC_MAX_SPOT_CHECKS})`,
         }, { status: 400 });
       }
 
@@ -166,6 +183,10 @@ export async function GET() {
       default: DEFAULT_DIFFICULTY,
       min: MIN_DIFFICULTY,
       max: MAX_DIFFICULTY,
+      public_max: PUBLIC_MAX_DIFFICULTY,
+    },
+    public_caps: {
+      max_spot_checks: PUBLIC_MAX_SPOT_CHECKS,
     },
     _note: 'Beats has no concept of identity. It authenticates time for anyone.',
   });
