@@ -81,7 +81,12 @@ This prevents “max-index only” selection, *assuming the candidate set includ
 
 - GitHub Actions (Ubuntu) workflow: `.github/workflows/ci.yml`
   - Runs: `npm ci`, `npm run build`, `node --test`
+  - Latest reference run (commit `cbdc516...`): `https://github.com/jarekpiot/provenonce-beats/actions/runs/22042547954`
   - Reviewer note: use the Actions run for the relevant commit as the canonical “no Windows EPERM flakiness” evidence.
+
+### Deployment reference
+
+- Production: `https://beats.provenonce.dev` (Vercel deployment `https://provenonce-beats-h5calqqni-provenonces-projects.vercel.app`, commit `cbdc516b9954307cb7c48a866ce60fc3c850eac4`)
 
 ### VDF / beat engine evidence
 
@@ -124,13 +129,9 @@ Academic wording recommendation:
 
 ### 5.2 Spot-check verification is probabilistic and (as a public endpoint) is vulnerable to adaptive retries
 
-`verifyBeatChain()` uses `Math.random()` to select spot checks (`lib/beat.ts`). A client can:
-- submit a chain,
-- if it fails, retry until the verifier’s randomness happens to sample only the beats the client computed honestly.
+Beats uses **deterministic sampling** for spot-check indices in chain verification (derived from the chain inputs) to remove adaptive retry advantages that exist with per-request randomness.
 
-This is acceptable as a “utility endpoint”, but it is *not* a robust acceptance oracle unless:
-- the verifier chooses randomness the prover cannot influence and cannot cheaply query repeatedly (e.g., a challenge/nonce or deterministic sampling derived from a server-chosen seed),
-- and/or the registry has additional stateful binding checks.
+Even with deterministic sampling, spot checks remain **probabilistic assurance**: they provide evidence that sampled intermediate states are consistent with sequential work, but they do not constitute a succinct cryptographic proof.
 
 ### 5.3 Proof verification validates local work at sampled indices but does not, by itself, prove continuity from `from_hash` to `to_hash`
 
@@ -138,7 +139,9 @@ This is acceptable as a “utility endpoint”, but it is *not* a robust accepta
 
 However:
 - It does not use `proof.from_hash` / `proof.to_hash` as cryptographic commitments.
-- It does not ensure that the provided spot check `prev` values are consistent with a single chain rooted at `from_hash`.
+- It does not ensure that the provided spot check `prev` values are consistent with a single chain rooted at `from_hash` unless the spot checks include an endpoint binding.
+
+Beats checkin proof construction now includes an explicit **endpoint spot check** at `to_beat`, so a verifier can require that the sampled work includes the claimed endpoint (this strengthens binding without making verification succinct).
 
 This is not automatically a vulnerability if the *registry* (stateful system) enforces:
 - `from_hash` equals the agent’s stored latest beat hash,
@@ -150,18 +153,11 @@ But academically, you must be explicit:
 
 ### 5.4 Public verify route allows client-controlled workload (DoS surface)
 
-In `POST /api/v1/beat/verify`:
-- `difficulty` is clamped to `[MIN_DIFFICULTY, MAX_DIFFICULTY]` where `MAX_DIFFICULTY = 1,000,000`.
-- `chain` mode permits up to `1000` beats and accepts `spot_checks` from the client without an explicit upper bound.
+In `POST /api/v1/beat/verify`, the public route enforces **explicit cost caps** (difficulty and spot-check count) so a single request cannot force unbounded recomputation. This reduces serverless DoS risk materially.
 
-Risk:
-- A single request can force very expensive recomputation if `difficulty` and/or `spot_checks` are high.
-- Rate limiting is in-memory per instance; distributed attackers can bypass it.
-
-Academic stance:
-- This is a real residual risk for the public verifier surface. Either:
-  - reduce public `MAX_DIFFICULTY` to a safe bound for serverless, and cap `spot_checks`, or
-  - treat this endpoint as best-effort (and document that production needs a shared KV limiter / WAF).
+Residual risks:
+- Rate limiting remains in-memory per instance; distributed attackers can still bypass it.
+- Any recomputation-based verifier has a non-trivial worst-case cost, so production deployments should still pair this with platform WAF / edge controls if the endpoint is exposed to untrusted traffic at scale.
 
 ### 5.5 Anchor continuity and fork choice are only as strong as key custody and RPC honesty
 
