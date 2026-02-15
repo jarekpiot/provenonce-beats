@@ -59,9 +59,19 @@ export class RateLimiter {
 }
 
 export function getClientIp(req: NextRequest): string {
+  const vercelForwardedFor = req.headers.get('x-vercel-forwarded-for');
+  if (vercelForwardedFor) {
+    return vercelForwardedFor.trim();
+  }
+
   const realIp = req.headers.get('x-real-ip');
   if (realIp) {
     return realIp.trim();
+  }
+
+  const cloudflareIp = req.headers.get('cf-connecting-ip');
+  if (cloudflareIp) {
+    return cloudflareIp.trim();
   }
 
   const forwarded = req.headers.get('x-forwarded-for');
