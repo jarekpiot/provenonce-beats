@@ -30,6 +30,10 @@
           "value": "camera=(), microphone=(), geolocation=()"
         },
         {
+          "key": "Access-Control-Allow-Origin",
+          "value": "https://beats.provenonce.dev"
+        },
+        {
           "key": "Content-Security-Policy",
           "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.devnet.solana.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
         }
