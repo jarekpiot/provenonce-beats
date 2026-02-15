@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   verifyBeat,
   verifyBeatChain,
+  verifyCheckinProof,
   DEFAULT_DIFFICULTY,
   MIN_DIFFICULTY,
   MAX_DIFFICULTY,
@@ -14,13 +15,13 @@ const limiter = new RateLimiter({ maxRequests: 10, windowMs: 60 * 1000 });
 /**
  * POST /api/v1/beat/verify
  *
- * PUBLIC — no auth required.
+ * PUBLIC - no auth required.
  * Stateless VDF proof verification.
  *
  * Modes:
- *   beat  — verify a single beat (full VDF recomputation)
- *   chain — verify a chain of beats (spot-check + linkage)
- *   proof — verify a checkin proof (endpoint + spot check VDF)
+ *   beat  - verify a single beat (full VDF recomputation)
+ *   chain - verify a chain of beats (spot-check + linkage)
+ *   proof - verify a checkin proof (strict spot-check verification)
  */
 export async function POST(req: NextRequest) {
   const rl = limiter.check(getClientIp(req));
@@ -34,7 +35,6 @@ export async function POST(req: NextRequest) {
       MAX_DIFFICULTY
     );
 
-    // ── Mode 1: Verify a single beat ──
     if (mode === 'beat') {
       const beat: Beat = body.beat;
 
@@ -59,7 +59,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── Mode 2: Verify a chain of beats ──
     if (mode === 'chain') {
       const beats: Beat[] = body.beats;
       const spotChecks = body.spot_checks || 3;
@@ -93,7 +92,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── Mode 3: Verify a checkin proof ──
     if (mode === 'proof') {
       const proof = body.proof;
 
@@ -121,45 +119,21 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const spotResults: { index: number; valid: boolean }[] = [];
-      let allValid = true;
-
-      if (proof.spot_checks && Array.isArray(proof.spot_checks)) {
-        for (const check of proof.spot_checks) {
-          if (!check.hash || !check.prev || typeof check.index !== 'number') {
-            spotResults.push({ index: check.index || -1, valid: false });
-            allValid = false;
-            continue;
-          }
-
-          const beatToVerify: Beat = {
-            index: check.index,
-            hash: check.hash,
-            prev: check.prev,
-            timestamp: check.timestamp || 0,
-            nonce: check.nonce,
-            anchor_hash: proof.anchor_hash,
-          };
-
-          const valid = verifyBeat(beatToVerify, difficulty);
-          spotResults.push({ index: check.index, valid });
-          if (!valid) allValid = false;
-        }
-      }
+      const result = verifyCheckinProof(proof, difficulty);
 
       return NextResponse.json({
         ok: true,
         mode: 'proof',
-        valid: allValid,
+        valid: result.valid,
+        reason: result.reason,
         from_beat: proof.from_beat,
         to_beat: proof.to_beat,
         beats_claimed: proof.to_beat - proof.from_beat,
-        spot_checks_verified: spotResults.length,
-        spot_check_results: spotResults,
+        spot_checks_verified: result.spot_checks_verified || 0,
         difficulty,
-        _note: allValid
-          ? `Proof verified: ${spotResults.length} spot checks passed VDF recomputation.`
-          : `Proof INVALID: one or more spot checks failed VDF recomputation.`,
+        _note: result.valid
+          ? `Proof verified: ${result.spot_checks_verified || 0} spot checks passed VDF recomputation.`
+          : `Proof INVALID: ${result.reason || 'verification failed'}.`,
       });
     }
 
@@ -175,18 +149,18 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/v1/beat/verify
- * Service info — public, no auth.
+ * Service info - public, no auth.
  */
 export async function GET() {
   return NextResponse.json({
-    service: 'Provenonce Beats — Time Authentication',
+    service: 'Provenonce Beats - Time Authentication',
     description: 'Stateless public utility for verifying VDF beat proofs.',
     stateless: true,
     auth_required: false,
     modes: {
       beat: 'Verify a single beat (full VDF recomputation)',
       chain: 'Verify a chain of beats (spot-check + linkage)',
-      proof: 'Verify a checkin proof (endpoint + spot check VDF)',
+      proof: 'Verify a checkin proof (strict spot-check verification)',
     },
     difficulty: {
       default: DEFAULT_DIFFICULTY,
