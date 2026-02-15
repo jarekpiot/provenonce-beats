@@ -77,6 +77,12 @@ This prevents “max-index only” selection, *assuming the candidate set includ
 
 ## 4) Evidence Review (What We Can Point To)
 
+### CI / reproducibility (canonical)
+
+- GitHub Actions (Ubuntu) workflow: `.github/workflows/ci.yml`
+  - Runs: `npm ci`, `npm run build`, `node --test`
+  - Reviewer note: use the Actions run for the relevant commit as the canonical “no Windows EPERM flakiness” evidence.
+
 ### VDF / beat engine evidence
 
 - Sequential hashing core:
@@ -203,4 +209,3 @@ Beats will stand up to scrutiny **if its claims are scoped correctly**:
 - As a global anchor publisher, it provides an on-chain append-only clock under a single key, with deterministic canonical selection over observed candidates.
 
 The main academic risks are over-claiming (“cryptographic VDF” / “continuous computation proof”) and under-specifying the adversarial retry and cost-amplification surfaces. Both are addressable by tightening definitions and capping verifier workload.
-
