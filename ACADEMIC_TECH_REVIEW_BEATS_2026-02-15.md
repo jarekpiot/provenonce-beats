@@ -3,6 +3,8 @@
 Date: 2026-02-15
 Scope: the Beats service (`provenonce-beats`) as deployed on `https://beats.provenonce.dev`, including its VDF construction, verification endpoints, and Solana anchor read/write logic.
 
+Addendum (2026-02-16): commit `8b1ba52` hardened Solana read/write paths to finalized commitment discipline and commit `5023cd1` made cron fail closed when `CRON_SECRET` is missing.
+
 This document is intended to withstand skeptical third‑party review. It separates:
 - **Security properties** (what the service claims to guarantee),
 - **Evidence** (code + tests/probes),
