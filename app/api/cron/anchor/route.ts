@@ -25,12 +25,14 @@ import {
  */
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      console.warn('[Cron /anchor] Unauthorized cron call');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  if (!cronSecret) {
+    console.warn('[Cron /anchor] CRON_SECRET not configured - rejecting request');
+    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 503 });
+  }
+  const authHeader = req.headers.get('authorization');
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    console.warn('[Cron /anchor] Unauthorized cron call');
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const t0 = Date.now();

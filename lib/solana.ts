@@ -14,7 +14,14 @@ import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-const SOLANA_CLUSTER = 'devnet';
+const SOLANA_CLUSTER = getSolanaClusterFromRpcUrl(SOLANA_RPC_URL);
+
+function getSolanaClusterFromRpcUrl(rpcUrl: string): 'devnet' | 'testnet' | 'mainnet-beta' {
+  const lower = rpcUrl.toLowerCase();
+  if (lower.includes('devnet')) return 'devnet';
+  if (lower.includes('testnet')) return 'testnet';
+  return 'mainnet-beta';
+}
 
 let _connection: Connection | null = null;
 
@@ -70,7 +77,7 @@ async function sendAndConfirmTx(
       if (status.err) {
         throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
       }
-      if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
+      if (status.confirmationStatus === 'finalized') {
         return signature;
       }
     }
