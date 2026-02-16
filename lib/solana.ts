@@ -32,7 +32,7 @@ export function getConnection(): Connection {
     // Without this, confirmation polling gets cached results and never sees
     // the confirmed status — same issue as Registry's db-client.ts (Sprint 8).
     _connection = new Connection(SOLANA_RPC_URL, {
-      commitment: 'confirmed',
+      commitment: 'finalized',
       fetch: (input: any, init?: any) => fetch(input, { ...init, cache: 'no-store' }),
     });
   }
@@ -66,7 +66,7 @@ async function sendAndConfirmTx(
   const rawTx = tx.serialize();
   const signature = await connection.sendRawTransaction(rawTx, {
     skipPreflight: false,
-    preflightCommitment: 'confirmed',
+    preflightCommitment: 'finalized',
   });
 
   const start = Date.now();
@@ -114,7 +114,7 @@ export async function sendAnchorMemo(
     throw new Error(`Anchor memo too large: ${memoBytes.length} bytes (max 566)`);
   }
 
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
 
   const tx = new Transaction();
   tx.recentBlockhash = blockhash;
@@ -135,6 +135,7 @@ export async function sendAnchorMemo(
   const signature = await sendAndConfirmTx(connection, tx, [anchorWallet]);
 
   const txInfo = await connection.getTransaction(signature, {
+    commitment: 'finalized',
     maxSupportedTransactionVersion: 0,
   });
 
@@ -158,12 +159,14 @@ export async function readLatestAnchor(): Promise<
 
   const signatures = await connection.getSignaturesForAddress(
     anchorWallet.publicKey,
-    { limit: 50 }
+    { limit: 50 },
+    'finalized'
   );
 
   const candidates: Array<GlobalAnchor & { tx_signature: string }> = [];
 
   for (const sig of signatures) {
+    if (sig.confirmationStatus !== 'finalized') continue;
     if (!sig.memo) continue;
     const parsed = parseAnchorMemo(sig.memo);
     if (!parsed) continue;
