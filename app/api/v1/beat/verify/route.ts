@@ -11,10 +11,19 @@ import {
 import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
 
 const limiter = new RateLimiter({ maxRequests: 10, windowMs: 60 * 1000 });
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+} as const;
 
 // Public verifier cost-guards: keep worst-case compute bounded for serverless.
 const PUBLIC_MAX_DIFFICULTY = 5000;
 const PUBLIC_MAX_SPOT_CHECKS = 25;
+
+export function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
 
 /**
  * POST /api/v1/beat/verify
@@ -29,7 +38,11 @@ const PUBLIC_MAX_SPOT_CHECKS = 25;
  */
 export async function POST(req: NextRequest) {
   const rl = limiter.check(getClientIp(req));
-  if (!rl.allowed) return rateLimitResponse(rl.resetAt);
+  if (!rl.allowed) {
+    const blocked = rateLimitResponse(rl.resetAt);
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => blocked.headers.set(k, v));
+    return blocked;
+  }
 
   try {
     const body = await req.json();
@@ -47,7 +60,7 @@ export async function POST(req: NextRequest) {
       if (!beat || typeof beat.index !== 'number' || !beat.hash || !beat.prev) {
         return NextResponse.json({
           error: 'Missing beat fields: index, hash, prev required',
-        }, { status: 400 });
+        }, { status: 400, headers: CORS_HEADERS });
       }
 
       const valid = verifyBeat(beat, difficulty);
@@ -62,7 +75,7 @@ export async function POST(req: NextRequest) {
         _note: valid
           ? 'Beat verified: VDF recomputation matches claimed hash.'
           : 'Beat INVALID: recomputed hash does not match.',
-      });
+      }, { headers: CORS_HEADERS });
     }
 
     if (mode === 'chain') {
@@ -76,13 +89,13 @@ export async function POST(req: NextRequest) {
       if (!beats || !Array.isArray(beats) || beats.length === 0) {
         return NextResponse.json({
           error: 'Missing or empty beats array',
-        }, { status: 400 });
+        }, { status: 400, headers: CORS_HEADERS });
       }
 
       if (beats.length > 1000) {
         return NextResponse.json({
           error: 'Chain too long for inline verification (max 1000 beats). Submit in segments.',
-        }, { status: 400 });
+        }, { status: 400, headers: CORS_HEADERS });
       }
 
       const result = verifyBeatChain(beats, difficulty, spotChecks);
@@ -99,7 +112,7 @@ export async function POST(req: NextRequest) {
         _note: result.valid
           ? `Chain verified: ${result.checked} beats spot-checked, all valid.`
           : `Chain INVALID: ${result.failed.length} beats failed verification.`,
-      });
+      }, { headers: CORS_HEADERS });
     }
 
     if (mode === 'proof') {
@@ -108,14 +121,14 @@ export async function POST(req: NextRequest) {
       if (!proof || typeof proof.from_beat !== 'number' || !proof.to_beat || !proof.from_hash || !proof.to_hash) {
         return NextResponse.json({
           error: 'Missing proof fields: from_beat, to_beat, from_hash, to_hash required',
-        }, { status: 400 });
+        }, { status: 400, headers: CORS_HEADERS });
       }
 
       const providedSpotChecks = proof.spot_checks?.length ?? 0;
       if (providedSpotChecks > PUBLIC_MAX_SPOT_CHECKS) {
         return NextResponse.json({
           error: `Too many spot checks (max ${PUBLIC_MAX_SPOT_CHECKS})`,
-        }, { status: 400 });
+        }, { status: 400, headers: CORS_HEADERS });
       }
 
       if (proof.to_beat <= proof.from_beat) {
@@ -124,7 +137,7 @@ export async function POST(req: NextRequest) {
           mode: 'proof',
           valid: false,
           reason: 'Beat range must be forward-moving',
-        });
+        }, { headers: CORS_HEADERS });
       }
 
       if (proof.beats_computed !== undefined && proof.beats_computed !== proof.to_beat - proof.from_beat) {
@@ -133,7 +146,7 @@ export async function POST(req: NextRequest) {
           mode: 'proof',
           valid: false,
           reason: 'Beat count mismatch',
-        });
+        }, { headers: CORS_HEADERS });
       }
 
       const result = verifyCheckinProof(proof, difficulty);
@@ -151,16 +164,16 @@ export async function POST(req: NextRequest) {
         _note: result.valid
           ? `Proof verified: ${result.spot_checks_verified || 0} spot checks passed VDF recomputation.`
           : `Proof INVALID: ${result.reason || 'verification failed'}.`,
-      });
+      }, { headers: CORS_HEADERS });
     }
 
     return NextResponse.json({
       error: `Unknown mode '${mode}'. Use 'beat', 'chain', or 'proof'.`,
-    }, { status: 400 });
+    }, { status: 400, headers: CORS_HEADERS });
 
   } catch (err: any) {
     console.error('[Beat /verify] Error:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500, headers: CORS_HEADERS });
   }
 }
 
@@ -189,5 +202,6 @@ export async function GET() {
       max_spot_checks: PUBLIC_MAX_SPOT_CHECKS,
     },
     _note: 'Beats has no concept of identity. It authenticates time for anyone.',
-  });
+  }, { headers: CORS_HEADERS });
 }
+

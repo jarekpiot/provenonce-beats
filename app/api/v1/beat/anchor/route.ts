@@ -4,6 +4,16 @@ import { NextResponse } from 'next/server';
 import { GLOBAL_ANCHOR_INTERVAL_SEC } from '@/lib/beat';
 import { readLatestAnchor, getExplorerUrl } from '@/lib/solana';
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+} as const;
+
+export function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 /**
  * GET /api/v1/beat/anchor
  *
@@ -22,7 +32,7 @@ export async function GET() {
         on_chain: { tx_signature: null, explorer_url: null, anchored: false },
         anchor_interval_sec: GLOBAL_ANCHOR_INTERVAL_SEC,
         _info: 'No anchor found on-chain. The cron has not run yet.',
-      });
+      }, { headers: CORS_HEADERS });
     }
 
     return NextResponse.json({
@@ -44,10 +54,10 @@ export async function GET() {
         latest.utc + GLOBAL_ANCHOR_INTERVAL_SEC * 1000
       ).toISOString(),
       _info: 'NIST tells you what time it is. Provenonce tells the agent at what speed it is allowed to exist.',
-    });
+    }, { headers: CORS_HEADERS });
 
   } catch (err: any) {
     console.error('[Beat /anchor] Error:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500, headers: CORS_HEADERS });
   }
 }

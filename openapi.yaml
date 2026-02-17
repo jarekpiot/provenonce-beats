@@ -1,0 +1,76 @@
+openapi: 3.1.0
+info:
+  title: Provenonce Beats API
+  version: 1.1.0
+  description: Stateless public utility for anchor clock reads, proof verification, and hash timestamping.
+servers:
+  - url: https://beats.provenonce.dev
+paths:
+  /api/health:
+    get:
+      summary: Service health
+      responses:
+        '200':
+          description: Health status
+  /api/v1/beat/anchor:
+    get:
+      summary: Get latest global anchor
+      responses:
+        '200':
+          description: Latest anchor payload
+  /api/v1/beat/verify:
+    get:
+      summary: Verification API metadata
+      responses:
+        '200':
+          description: Metadata
+    post:
+      summary: Verify beat, chain, or proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Verification result
+        '400':
+          description: Invalid input
+        '429':
+          description: Rate limited
+  /api/v1/beat/key:
+    get:
+      summary: Get public key for receipt signature verification
+      responses:
+        '200':
+          description: Public key metadata
+  /api/v1/beat/timestamp:
+    post:
+      summary: Anchor a SHA-256 hash to current beat and Solana memo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hash]
+              properties:
+                hash:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
+      responses:
+        '200':
+          description: Timestamp receipt
+        '400':
+          description: Invalid hash/body
+        '413':
+          description: Request too large
+        '415':
+          description: Invalid content type
+        '429':
+          description: Rate limited
+        '502':
+          description: Solana write/read failure
+        '503':
+          description: No anchor available yet

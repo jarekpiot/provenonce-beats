@@ -22,6 +22,12 @@ export default function Home() {
           <li>
             <a href="/api/v1/beat/verify">POST /api/v1/beat/verify</a> (verify beat/chain/proof)
           </li>
+          <li>
+            <a href="/api/v1/beat/timestamp">POST /api/v1/beat/timestamp</a> (timestamp a SHA-256 hash on Solana)
+          </li>
+          <li>
+            <a href="/api/v1/beat/key">GET /api/v1/beat/key</a> (public key for receipt verification)
+          </li>
         </ul>
       </section>
 

@@ -5,6 +5,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from '@solana/web3.js';
+import { createPrivateKey, sign } from 'node:crypto';
 import bs58 from 'bs58';
 import type { GlobalAnchor } from './beat';
 import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
@@ -12,6 +13,7 @@ import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
 // ============ CONFIG ============
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const SOLANA_CLUSTER = getSolanaClusterFromRpcUrl(SOLANA_RPC_URL);
@@ -99,10 +101,44 @@ export interface AnchorMemoData {
   epoch: number;
 }
 
+export interface TimestampMemoData {
+  v: 1;
+  type: 'timestamp';
+  hash: string;
+  anchor_index: number;
+  anchor_hash: string;
+  utc: number;
+}
+
+function canonicalJson(value: Record<string, unknown>): string {
+  const keys = Object.keys(value).sort();
+  const canonical: Record<string, unknown> = {};
+  for (const key of keys) canonical[key] = value[key];
+  return JSON.stringify(canonical);
+}
+
+export function getAnchorPublicKeyBase58(): string {
+  return getAnchorKeypair().publicKey.toBase58();
+}
+
+export function getAnchorPublicKeyHex(): string {
+  return Buffer.from(getAnchorKeypair().publicKey.toBytes()).toString('hex');
+}
+
+export function signReceipt(payload: Record<string, unknown>): { signature_base64: string } {
+  const keypair = getAnchorKeypair();
+  const seed = Buffer.from(keypair.secretKey.slice(0, 32));
+  const privKeyDer = Buffer.concat([ED25519_PKCS8_PREFIX, seed]);
+  const privateKey = createPrivateKey({ key: privKeyDer, format: 'der', type: 'pkcs8' });
+  const message = Buffer.from(canonicalJson(payload), 'utf8');
+  const signature = sign(null, message, privateKey);
+  return { signature_base64: signature.toString('base64') };
+}
+
 // ============ WRITE ANCHOR TO SOLANA ============
 
 export async function sendAnchorMemo(
-  anchor: AnchorMemoData
+  anchor: AnchorMemoData | TimestampMemoData
 ): Promise<{ signature: string; slot: number }> {
   const connection = getConnection();
   const anchorWallet = getAnchorKeypair();
