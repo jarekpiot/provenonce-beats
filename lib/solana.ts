@@ -252,3 +252,9 @@ export async function readLatestAnchorCached(ttlMs = 10_000): Promise<
 export function getExplorerUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${signature}?cluster=${SOLANA_CLUSTER}`;
 }
+
+export async function getAnchorBalanceLamports(): Promise<number> {
+  const connection = getConnection();
+  const anchorWallet = getAnchorKeypair();
+  return connection.getBalance(anchorWallet.publicKey, 'finalized');
+}

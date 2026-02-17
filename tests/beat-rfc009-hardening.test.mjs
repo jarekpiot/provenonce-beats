@@ -18,9 +18,14 @@ test('timestamp route uses cached anchor read path', () => {
   assert.equal(timestampRouteSource.includes('readLatestAnchorCached(10_000)'), true);
 });
 
+test('timestamp route checks anchor wallet balance before memo write', () => {
+  assert.equal(timestampRouteSource.includes('getAnchorBalanceLamports()'), true);
+  assert.equal(timestampRouteSource.includes('anchor wallet balance too low'), true);
+});
+
 test('receipt signing key is HKDF-derived from anchor key material', () => {
   assert.equal(solanaLibSource.includes('hkdfSync('), true);
   assert.equal(solanaLibSource.includes('RECEIPT_SIGNING_KEY_INFO'), true);
   assert.equal(solanaLibSource.includes('getReceiptPublicKeyBase58'), true);
 });
-
+// nonce 000423

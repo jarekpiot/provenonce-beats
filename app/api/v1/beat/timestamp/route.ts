@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
-import { readLatestAnchorCached, sendAnchorMemo, getExplorerUrl, signReceipt, getReceiptPublicKeyBase58 } from '@/lib/solana';
+import { readLatestAnchorCached, sendAnchorMemo, getExplorerUrl, signReceipt, getReceiptPublicKeyBase58, getAnchorBalanceLamports } from '@/lib/solana';
 
 export const maxDuration = 60;
 
 const limiter = new RateLimiter({ maxRequests: 5, windowMs: 60 * 1000 });
 const dailyLimiter = new RateLimiter({ maxRequests: 10, windowMs: 24 * 60 * 60 * 1000 });
 const MAX_BODY_BYTES = 256;
+const MIN_ANCHOR_BALANCE_LAMPORTS = 5_000;
 const HASH_REGEX = /^[0-9a-f]{64}$/;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -81,6 +82,14 @@ export async function POST(req: NextRequest) {
       anchor_hash: anchor.hash,
       utc: timestampUtc,
     };
+
+    const anchorBalanceLamports = await getAnchorBalanceLamports();
+    if (anchorBalanceLamports < MIN_ANCHOR_BALANCE_LAMPORTS) {
+      return NextResponse.json(
+        { error: 'Timestamp temporarily unavailable: anchor wallet balance too low' },
+        { status: 503, headers: CORS_HEADERS },
+      );
+    }
 
     const { signature } = await sendAnchorMemo(memo);
 
