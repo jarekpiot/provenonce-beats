@@ -70,7 +70,7 @@ export class RateLimiter {
 
     const toDrop = this.map.size - this.maxEntries;
     let dropped = 0;
-    for (const key of this.map.keys()) {
+    for (const key of Array.from(this.map.keys())) {
       this.map.delete(key);
       dropped++;
       if (dropped >= toDrop) break;
