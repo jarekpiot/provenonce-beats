@@ -25,6 +25,10 @@ export async function GET() {
         anchor_interval_ms: anchorIntervalMs,
         anchor_stale_threshold_ms: anchorIntervalMs * 3,
       },
+      operations: {
+        log_drain_configured: process.env.VERCEL_LOG_DRAIN_CONFIGURED === '1',
+        pro_tier_token_configured: !!process.env.BEATS_PRO_TIER_TOKEN,
+      },
     });
   } catch (err: any) {
     return NextResponse.json({

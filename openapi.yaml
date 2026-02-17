@@ -49,6 +49,13 @@ paths:
     post:
       summary: Anchor a SHA-256 hash to current beat and Solana memo
       description: utc fields in responses are Unix epoch milliseconds.
+      parameters:
+        - in: header
+          name: X-Beats-Tier-Token
+          required: false
+          schema:
+            type: string
+          description: Optional pro-tier token for higher quotas.
       requestBody:
         required: true
         content:
@@ -70,7 +77,7 @@ paths:
         '415':
           description: Invalid content type
         '429':
-          description: Rate limited (5/min and 10/day per IP)
+          description: Rate limited (free 5/min + 10/day, pro 30/min + 500/day per IP)
         '502':
           description: Solana write/read failure
         '503':

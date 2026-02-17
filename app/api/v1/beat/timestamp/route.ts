@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
 import { readLatestAnchorCached, sendAnchorMemo, getExplorerUrl, signReceipt, getReceiptPublicKeyBase58, getAnchorBalanceLamports } from '@/lib/solana';
 
@@ -6,17 +7,30 @@ export const maxDuration = 60;
 
 const limiter = new RateLimiter({ maxRequests: 5, windowMs: 60 * 1000 });
 const dailyLimiter = new RateLimiter({ maxRequests: 10, windowMs: 24 * 60 * 60 * 1000 });
+const proLimiter = new RateLimiter({ maxRequests: 30, windowMs: 60 * 1000 });
+const proDailyLimiter = new RateLimiter({ maxRequests: 500, windowMs: 24 * 60 * 60 * 1000 });
 const MAX_BODY_BYTES = 256;
 const MIN_ANCHOR_BALANCE_LAMPORTS = 5_000;
 const HASH_REGEX = /^[0-9a-f]{64}$/;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Beats-Tier-Token',
 } as const;
 
 export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
+function isValidProTierToken(req: NextRequest): boolean {
+  const configured = process.env.BEATS_PRO_TIER_TOKEN;
+  if (!configured) return false;
+  const provided = req.headers.get('x-beats-tier-token');
+  if (!provided) return false;
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(configured, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 /**
@@ -29,17 +43,18 @@ export function OPTIONS() {
  * - returns tx reference + signed receipt
  */
 export async function POST(req: NextRequest) {
+  const tier = isValidProTierToken(req) ? 'pro' : 'free';
   const ip = getClientIp(req);
-  const rl = limiter.check(ip);
+  const rl = tier === 'pro' ? proLimiter.check(ip) : limiter.check(ip);
   if (!rl.allowed) {
     const blocked = rateLimitResponse(rl.resetAt);
     Object.entries(CORS_HEADERS).forEach(([k, v]) => blocked.headers.set(k, v));
     return blocked;
   }
-  const daily = dailyLimiter.check(ip);
+  const daily = tier === 'pro' ? proDailyLimiter.check(ip) : dailyLimiter.check(ip);
   if (!daily.allowed) {
     const blocked = NextResponse.json(
-      { error: 'Daily timestamp quota exceeded. Please try again tomorrow.' },
+      { error: `Daily timestamp quota exceeded for ${tier} tier. Please try again tomorrow.` },
       { status: 429, headers: { ...CORS_HEADERS, 'Retry-After': String(Math.ceil((daily.resetAt - Date.now()) / 1000)) } },
     );
     return blocked;
@@ -117,6 +132,7 @@ export async function POST(req: NextRequest) {
         signature: receiptSig.signature_base64,
         public_key: getReceiptPublicKeyBase58(),
       },
+      tier,
       _note: 'Canonical proof is the Solana transaction. Receipt signature is convenience verification. utc is Unix epoch milliseconds.',
     }, { headers: CORS_HEADERS });
   } catch (err: any) {
