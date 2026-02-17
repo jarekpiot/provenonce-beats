@@ -5,7 +5,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from '@solana/web3.js';
-import { createPrivateKey, sign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, hkdfSync, sign } from 'node:crypto';
 import bs58 from 'bs58';
 import type { GlobalAnchor } from './beat';
 import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
@@ -14,6 +14,7 @@ import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+const RECEIPT_SIGNING_KEY_INFO = Buffer.from('provenonce:beats:timestamp-receipt:v1', 'utf8');
 
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const SOLANA_CLUSTER = getSolanaClusterFromRpcUrl(SOLANA_RPC_URL);
@@ -118,18 +119,33 @@ function canonicalJson(value: Record<string, unknown>): string {
 }
 
 export function getAnchorPublicKeyBase58(): string {
-  return getAnchorKeypair().publicKey.toBase58();
+  return getReceiptPublicKeyBase58();
 }
 
 export function getAnchorPublicKeyHex(): string {
-  return Buffer.from(getAnchorKeypair().publicKey.toBytes()).toString('hex');
+  return getReceiptPublicKeyHex();
+}
+
+function getReceiptPrivateKey() {
+  const keypair = getAnchorKeypair();
+  const anchorSeed = Buffer.from(keypair.secretKey.slice(0, 32));
+  const derivedSeed = hkdfSync('sha256', anchorSeed, Buffer.alloc(0), RECEIPT_SIGNING_KEY_INFO, 32);
+  const privKeyDer = Buffer.concat([ED25519_PKCS8_PREFIX, Buffer.from(derivedSeed)]);
+  return createPrivateKey({ key: privKeyDer, format: 'der', type: 'pkcs8' });
+}
+
+export function getReceiptPublicKeyHex(): string {
+  const privateKey = getReceiptPrivateKey();
+  const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+  return Buffer.from(spki).subarray(-32).toString('hex');
+}
+
+export function getReceiptPublicKeyBase58(): string {
+  return bs58.encode(Buffer.from(getReceiptPublicKeyHex(), 'hex'));
 }
 
 export function signReceipt(payload: Record<string, unknown>): { signature_base64: string } {
-  const keypair = getAnchorKeypair();
-  const seed = Buffer.from(keypair.secretKey.slice(0, 32));
-  const privKeyDer = Buffer.concat([ED25519_PKCS8_PREFIX, seed]);
-  const privateKey = createPrivateKey({ key: privKeyDer, format: 'der', type: 'pkcs8' });
+  const privateKey = getReceiptPrivateKey();
   const message = Buffer.from(canonicalJson(payload), 'utf8');
   const signature = sign(null, message, privateKey);
   return { signature_base64: signature.toString('base64') };
@@ -219,6 +235,18 @@ export async function readLatestAnchor(): Promise<
   }
 
   return selectCanonicalAnchor(candidates);
+}
+
+let _anchorCache: { value: (GlobalAnchor & { tx_signature: string }) | null; expiresAt: number } | null = null;
+
+export async function readLatestAnchorCached(ttlMs = 10_000): Promise<
+  (GlobalAnchor & { tx_signature: string }) | null
+> {
+  const now = Date.now();
+  if (_anchorCache && now < _anchorCache.expiresAt) return _anchorCache.value;
+  const latest = await readLatestAnchor();
+  _anchorCache = { value: latest, expiresAt: now + ttlMs };
+  return latest;
 }
 
 export function getExplorerUrl(signature: string): string {

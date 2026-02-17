@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAnchorPublicKeyBase58, getAnchorPublicKeyHex } from '@/lib/solana';
+import { getReceiptPublicKeyBase58, getReceiptPublicKeyHex } from '@/lib/solana';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -13,11 +13,10 @@ export function OPTIONS() {
 
 export function GET() {
   return NextResponse.json({
-    public_key_base58: getAnchorPublicKeyBase58(),
-    public_key_hex: getAnchorPublicKeyHex(),
+    public_key_base58: getReceiptPublicKeyBase58(),
+    public_key_hex: getReceiptPublicKeyHex(),
     algorithm: 'Ed25519',
     purpose: 'Beats response-signing convenience verification',
     _note: 'Canonical proof is the on-chain SPL Memo transaction.',
   }, { headers: CORS_HEADERS });
 }
-

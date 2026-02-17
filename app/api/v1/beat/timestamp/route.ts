@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
-import { readLatestAnchor, sendAnchorMemo, getExplorerUrl, signReceipt, getAnchorPublicKeyBase58 } from '@/lib/solana';
+import { readLatestAnchorCached, sendAnchorMemo, getExplorerUrl, signReceipt, getReceiptPublicKeyBase58 } from '@/lib/solana';
 
 export const maxDuration = 60;
 
 const limiter = new RateLimiter({ maxRequests: 5, windowMs: 60 * 1000 });
+const dailyLimiter = new RateLimiter({ maxRequests: 10, windowMs: 24 * 60 * 60 * 1000 });
 const MAX_BODY_BYTES = 256;
 const HASH_REGEX = /^[0-9a-f]{64}$/;
 const CORS_HEADERS = {
@@ -27,10 +28,19 @@ export function OPTIONS() {
  * - returns tx reference + signed receipt
  */
 export async function POST(req: NextRequest) {
-  const rl = limiter.check(getClientIp(req));
+  const ip = getClientIp(req);
+  const rl = limiter.check(ip);
   if (!rl.allowed) {
     const blocked = rateLimitResponse(rl.resetAt);
     Object.entries(CORS_HEADERS).forEach(([k, v]) => blocked.headers.set(k, v));
+    return blocked;
+  }
+  const daily = dailyLimiter.check(ip);
+  if (!daily.allowed) {
+    const blocked = NextResponse.json(
+      { error: 'Daily timestamp quota exceeded. Please try again tomorrow.' },
+      { status: 429, headers: { ...CORS_HEADERS, 'Retry-After': String(Math.ceil((daily.resetAt - Date.now()) / 1000)) } },
+    );
     return blocked;
   }
 
@@ -57,7 +67,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const anchor = await readLatestAnchor();
+    const anchor = await readLatestAnchorCached(10_000);
     if (!anchor) {
       return NextResponse.json({ error: 'No anchor available on-chain yet' }, { status: 503, headers: CORS_HEADERS });
     }
@@ -82,6 +92,11 @@ export async function POST(req: NextRequest) {
       tx_signature: signature,
     };
     const receiptSig = signReceipt(receiptPayload);
+    console.info('[beat/timestamp] anchored', {
+      hash_prefix: `${hashRaw.slice(0, 10)}...`,
+      anchor_index: anchor.beat_index,
+      tx_prefix: `${signature.slice(0, 10)}...`,
+    });
 
     return NextResponse.json({
       timestamp: receiptPayload,
@@ -91,9 +106,9 @@ export async function POST(req: NextRequest) {
       },
       receipt: {
         signature: receiptSig.signature_base64,
-        public_key: getAnchorPublicKeyBase58(),
+        public_key: getReceiptPublicKeyBase58(),
       },
-      _note: 'Canonical proof is the Solana transaction. Receipt signature is convenience verification.',
+      _note: 'Canonical proof is the Solana transaction. Receipt signature is convenience verification. utc is Unix epoch milliseconds.',
     }, { headers: CORS_HEADERS });
   } catch (err: any) {
     return NextResponse.json(
@@ -102,4 +117,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

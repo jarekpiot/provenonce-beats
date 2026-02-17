@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Provenonce Beats API
-  version: 1.1.0
+  version: 1.2.0
   description: Stateless public utility for anchor clock reads, proof verification, and hash timestamping.
 servers:
   - url: https://beats.provenonce.dev
@@ -11,7 +11,7 @@ paths:
       summary: Service health
       responses:
         '200':
-          description: Health status
+          description: Health status with latest anchor telemetry
   /api/v1/beat/anchor:
     get:
       summary: Get latest global anchor
@@ -48,6 +48,7 @@ paths:
   /api/v1/beat/timestamp:
     post:
       summary: Anchor a SHA-256 hash to current beat and Solana memo
+      description: utc fields in responses are Unix epoch milliseconds.
       requestBody:
         required: true
         content:
@@ -69,7 +70,7 @@ paths:
         '415':
           description: Invalid content type
         '429':
-          description: Rate limited
+          description: Rate limited (5/min and 10/day per IP)
         '502':
           description: Solana write/read failure
         '503':

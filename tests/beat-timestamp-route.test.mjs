@@ -20,7 +20,8 @@ test('timestamp route anchors on-chain and returns signed receipt metadata', () 
   assert.equal(routeSource.includes('sendAnchorMemo(memo)'), true);
   assert.equal(routeSource.includes('signReceipt(receiptPayload)'), true);
   assert.equal(routeSource.includes('getExplorerUrl(signature)'), true);
-  assert.equal(routeSource.includes('getAnchorPublicKeyBase58()'), true);
+  assert.equal(routeSource.includes('getReceiptPublicKeyBase58()'), true);
 });
 
 // timestamp route guard coverage
+// route receipt key assertion updated
