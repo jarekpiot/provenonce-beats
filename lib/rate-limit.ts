@@ -15,10 +15,12 @@ export class RateLimiter {
   private map = new Map<string, RateLimitEntry>();
   private maxRequests: number;
   private windowMs: number;
+  private maxEntries: number;
 
-  constructor(opts: { maxRequests: number; windowMs: number }) {
+  constructor(opts: { maxRequests: number; windowMs: number; maxEntries?: number }) {
     this.maxRequests = opts.maxRequests;
     this.windowMs = opts.windowMs;
+    this.maxEntries = Math.max(100, opts.maxEntries ?? 20_000);
 
     const interval = setInterval(() => this.cleanup(), 60_000);
     if (typeof interval === 'object' && 'unref' in interval) {
@@ -28,11 +30,13 @@ export class RateLimiter {
 
   check(ip: string): RateLimitResult {
     const now = Date.now();
+    this.enforceCapacity(now);
     const entry = this.map.get(ip);
 
     if (!entry || now >= entry.resetAt) {
       const resetAt = now + this.windowMs;
       this.map.set(ip, { count: 1, resetAt });
+      this.enforceCapacity(now);
       return { allowed: true, remaining: this.maxRequests - 1, resetAt };
     }
 
@@ -40,6 +44,7 @@ export class RateLimiter {
     if (entry.count > this.maxRequests) {
       return { allowed: false, remaining: 0, resetAt: entry.resetAt };
     }
+    this.enforceCapacity(now);
 
     return {
       allowed: true,
@@ -55,6 +60,21 @@ export class RateLimiter {
         this.map.delete(ip);
       }
     });
+  }
+
+  private enforceCapacity(now: number) {
+    if (this.map.size <= this.maxEntries) return;
+
+    this.cleanup();
+    if (this.map.size <= this.maxEntries) return;
+
+    const toDrop = this.map.size - this.maxEntries;
+    let dropped = 0;
+    for (const key of this.map.keys()) {
+      this.map.delete(key);
+      dropped++;
+      if (dropped >= toDrop) break;
+    }
   }
 }
 
