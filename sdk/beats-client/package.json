@@ -1,10 +1,20 @@
 {
   "name": "@provenonce/beats-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Minimal client for the public Provenonce Beats service",
   "type": "module",
   "main": "index.mjs",
   "types": "index.d.ts",
-  "license": "MIT",
-  "private": true
+  "exports": {
+    ".": {
+      "import": "./index.mjs",
+      "types": "./index.d.ts"
+    }
+  },
+  "files": [
+    "index.mjs",
+    "index.d.ts",
+    "README.md"
+  ],
+  "license": "MIT"
 }

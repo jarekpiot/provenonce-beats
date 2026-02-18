@@ -17,7 +17,7 @@ paths:
       summary: Get latest global anchor
       responses:
         '200':
-          description: Latest anchor payload
+          description: Latest anchor payload with on-chain reference and signed receipt
   /api/v1/beat/verify:
     get:
       summary: Verification API metadata

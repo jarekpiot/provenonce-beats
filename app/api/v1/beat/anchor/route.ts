@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { GLOBAL_ANCHOR_INTERVAL_SEC } from '@/lib/beat';
-import { readLatestAnchor, getExplorerUrl } from '@/lib/solana';
+import { readLatestAnchor, getExplorerUrl, getReceiptPublicKeyBase58, signReceipt } from '@/lib/solana';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -35,6 +35,17 @@ export async function GET() {
       }, { headers: CORS_HEADERS });
     }
 
+    const receiptPayload = {
+      beat_index: latest.beat_index,
+      hash: latest.hash,
+      prev_hash: latest.prev_hash,
+      utc: latest.utc,
+      difficulty: latest.difficulty,
+      epoch: latest.epoch,
+      tx_signature: latest.tx_signature,
+    };
+    const receiptSig = signReceipt(receiptPayload);
+
     return NextResponse.json({
       anchor: {
         beat_index: latest.beat_index,
@@ -49,11 +60,15 @@ export async function GET() {
         explorer_url: getExplorerUrl(latest.tx_signature),
         anchored: true,
       },
+      receipt: {
+        signature: receiptSig.signature_base64,
+        public_key: getReceiptPublicKeyBase58(),
+      },
       anchor_interval_sec: GLOBAL_ANCHOR_INTERVAL_SEC,
       next_anchor_at: new Date(
         latest.utc + GLOBAL_ANCHOR_INTERVAL_SEC * 1000
       ).toISOString(),
-      _info: 'NIST tells you what time it is. Provenonce tells the agent at what speed it is allowed to exist.',
+      _info: 'NIST tells you what time it is. Provenonce tells the agent at what speed it is allowed to exist. receipt verifies response authenticity.',
     }, { headers: CORS_HEADERS });
 
   } catch (err: any) {
