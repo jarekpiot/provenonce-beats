@@ -26,6 +26,7 @@ const beats = createBeatsClient();
 const anchor = await beats.getAnchor();
 const receipt = await beats.timestampHash('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 const receiptValid = await beats.verifyReceipt(receipt);
+const anchorValid = await beats.verifyAnchor(anchor);
 const onChain = await beats.verifyOnChain(receipt.on_chain.tx_signature, { cluster: 'devnet' });
 
 // Auto-verify anchor receipt:
@@ -42,6 +43,8 @@ const verifiedAnchor = await beats.getAnchor({ verify: true });
 
 ## Helpers
 
-- `verifyReceipt(response)` — offline Ed25519 verification of timestamp/anchor receipts.
-- `verifyOnChain(txSignature, { cluster | rpcUrl })` — direct Solana RPC status check.
-- `getAnchor({ verify: true })` — fetch anchor and verify attached receipt in one call.
+- `verifyReceipt(response)` - offline Ed25519 verification of timestamp/anchor receipts.
+- `verifyAnchor(anchorResponse)` - explicit offline verification helper for anchor responses.
+- `verifyOnChain(txSignature, { cluster | rpcUrl })` - direct Solana RPC status check.
+- `getAnchor({ verify: true })` - fetch anchor and verify attached receipt in one call.
+

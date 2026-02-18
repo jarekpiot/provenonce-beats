@@ -128,7 +128,7 @@ export function createBeatsClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = glob
     async getAnchor(opts = {}) {
       const anchor = await request('/api/v1/beat/anchor');
       if (opts.verify === true) {
-        const ok = await this.verifyReceipt(anchor);
+        const ok = await this.verifyAnchor(anchor);
         if (!ok) throw new Error('Anchor receipt verification failed');
         return { ...anchor, _verified_receipt: true };
       }
@@ -162,6 +162,10 @@ export function createBeatsClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = glob
         return false;
       }
     },
+    async verifyAnchor(anchorResponse) {
+      if (!anchorResponse?.anchor || !anchorResponse?.receipt) return false;
+      return this.verifyReceipt(anchorResponse);
+    },
     async verifyOnChain(txSignature, opts = {}) {
       return verifyOnChainTx({
         txSignature,
@@ -172,4 +176,3 @@ export function createBeatsClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = glob
     },
   };
 }
-

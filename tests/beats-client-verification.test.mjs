@@ -57,6 +57,26 @@ test('getAnchor({ verify: true }) auto-verifies receipt', async () => {
   const client = createBeatsClient({ fetchImpl });
   const out = await client.getAnchor({ verify: true });
   assert.equal(out._verified_receipt, true);
+  const explicit = await client.verifyAnchor(out);
+  assert.equal(explicit, true);
+});
+
+test('verifyReceipt fails on tampered payload', async () => {
+  const payload = {
+    hash: 'e'.repeat(64),
+    anchor_index: 555,
+    anchor_hash: 'f'.repeat(64),
+    utc: 1770000002000,
+    tx_signature: 'sig-tamper',
+  };
+  const { pubHex, signature } = makeSignedResponse(payload);
+  const client = createBeatsClient({ fetchImpl: async () => ({ ok: true, text: async () => '{}' }) });
+  const tampered = { ...payload, hash: '0'.repeat(64) };
+  const ok = await client.verifyReceipt({
+    timestamp: tampered,
+    receipt: { signature, public_key: pubHex },
+  });
+  assert.equal(ok, false);
 });
 
 test('verifyOnChain parses Solana status response', async () => {
@@ -74,4 +94,3 @@ test('verifyOnChain parses Solana status response', async () => {
   assert.equal(result.finalized, true);
   assert.equal(result.slot, 123456);
 });
-
