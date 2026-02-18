@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 
 const curlExample = `curl -X POST https://beats.provenonce.dev/api/v1/beat/timestamp \\
   -H "content-type: application/json" \\
-  -d '{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'`;
+  -d '{"hash":"<your-lowercase-sha256-hash>"}'`;
 
 export default async function Home() {
   let beatIndex: number | null = null;
@@ -66,7 +66,29 @@ export default async function Home() {
 
         <section className={styles.curlBlock}>
           <div className={styles.curlTitle}>Quick Start (`/beat/timestamp`)</div>
+          <p className={styles.curlHint}>
+            Replace <code>&lt;your-lowercase-sha256-hash&gt;</code> with a real 64-character lowercase SHA-256 hash.
+          </p>
           <pre className={styles.code}>{curlExample}</pre>
+        </section>
+
+        <section className={styles.testFlow}>
+          <h2 className={styles.testFlowTitle}>Test Beats in 5 Steps</h2>
+          <ol className={styles.testFlowList}>
+            <li>Generate a SHA-256 hash locally for any file or payload.</li>
+            <li>POST it to <code>/api/v1/beat/timestamp</code>.</li>
+            <li>Confirm response includes <code>on_chain.tx_signature</code> and signed <code>receipt</code>.</li>
+            <li>Open the Solana explorer URL from the response (devnet) and confirm the transaction exists.</li>
+            <li>Fetch <code>/api/v1/beat/key</code> and verify the receipt signature offline.</li>
+          </ol>
+          <div className={styles.expectedBlock}>
+            <strong>Expected response fields:</strong>{' '}
+            <code>submitted_hash</code>, <code>anchor.beat_index</code>, <code>on_chain.tx_signature</code>, <code>receipt.signature</code>
+          </div>
+          <p className={styles.testFlowLinks}>
+            Full guide:{' '}
+            <a href="https://provenonce.dev/getting-started/beats-only">provenonce.dev/getting-started/beats-only</a>
+          </p>
         </section>
 
         <div className={styles.endpointGrid}>

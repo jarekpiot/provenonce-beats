@@ -92,6 +92,17 @@
   border-bottom: 1px solid var(--beats-border);
 }
 
+.curlHint {
+  margin: 0;
+  padding: 12px 14px 0;
+  color: var(--beats-muted);
+  font-size: 14px;
+}
+
+.curlHint code {
+  font-family: var(--beats-font-mono);
+}
+
 .code {
   margin: 0;
   padding: 14px;
@@ -101,6 +112,54 @@
   background: #f8fafc;
   font-family: var(--beats-font-mono);
   overflow-x: auto;
+}
+
+.testFlow {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--beats-border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.testFlowTitle {
+  margin: 0;
+  color: var(--beats-primary);
+  font-size: 24px;
+}
+
+.testFlowList {
+  margin: 10px 0 0;
+  padding-left: 22px;
+}
+
+.testFlowList li {
+  margin-top: 6px;
+}
+
+.testFlowList code,
+.expectedBlock code {
+  font-family: var(--beats-font-mono);
+}
+
+.expectedBlock {
+  margin-top: 12px;
+  color: var(--beats-text);
+}
+
+.testFlowLinks {
+  margin-top: 10px;
+  color: var(--beats-muted);
+}
+
+.testFlowLinks a {
+  color: var(--beats-accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.testFlowLinks a:hover {
+  text-decoration: underline;
 }
 
 .endpointGrid {
