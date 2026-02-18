@@ -2,10 +2,10 @@ import styles from './page.module.css';
 import { readLatestAnchorCached } from '@/lib/solana';
 
 const ENDPOINTS = [
-  ['GET', '/api/health', 'service telemetry'],
+  ['GET', '/api/health', 'service health'],
   ['GET', '/api/v1/beat/anchor', 'latest global anchor'],
   ['GET', '/api/v1/beat/key', 'receipt verification key'],
-  ['GET', '/api/v1/beat/verify', 'verify API metadata'],
+  ['GET', '/api/v1/beat/verify', 'verify API info'],
   ['POST', '/api/v1/beat/verify', 'verify beat/chain/proof'],
   ['POST', '/api/v1/beat/timestamp', 'timestamp SHA-256 hash'],
 ] as const;
@@ -84,7 +84,7 @@ export default async function Home() {
           </ol>
           <div className={styles.expectedBlock}>
             <strong>Expected response fields:</strong>{' '}
-            <code>submitted_hash</code>, <code>anchor.beat_index</code>, <code>on_chain.tx_signature</code>, <code>receipt.signature</code>
+            <code>timestamp.hash</code>, <code>timestamp.anchor_index</code>, <code>on_chain.tx_signature</code>, <code>receipt.signature</code>
           </div>
           <p className={styles.testFlowLinks}>
             Full guide:{' '}
@@ -94,7 +94,7 @@ export default async function Home() {
 
         <div className={styles.endpointGrid}>
           {ENDPOINTS.map(([method, href, note]) => (
-            <a key={href} href={href} className={styles.endpointCard}>
+            <a key={`${method} ${href}`} href={href} className={styles.endpointCard}>
               <strong className={styles.endpointMethod}>{method}</strong>
               <span className={styles.endpointPath}>{href}</span>
               <div className={styles.endpointNote}>{note}</div>
