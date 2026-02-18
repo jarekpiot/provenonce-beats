@@ -17,6 +17,11 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata = {
   title: 'Provenonce Beats',
   description: 'Stateless time authentication service',
+  icons: {
+    icon: { url: '/logo.png', type: 'image/png' },
+    shortcut: '/logo.png',
+    apple: '/logo.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

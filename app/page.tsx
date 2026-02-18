@@ -37,6 +37,7 @@ export default async function Home() {
   return (
     <main className={styles.main}>
       <div className={styles.container}>
+        <img src="/logo.png" alt="Provenonce" style={{ width: 36, height: 36, borderRadius: 9999, margin: '0 auto 0.75rem' }} />
         <div className={styles.wordmark}>PROVENONCE</div>
         <h1 className={styles.title}>Provenonce Beats</h1>
         <p className={styles.subtitle}>
