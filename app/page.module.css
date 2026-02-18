@@ -10,16 +10,83 @@
   margin: 0 auto;
 }
 
+.wordmark {
+  color: var(--beats-primary);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+}
+
 .title {
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 44px;
   letter-spacing: -0.03em;
+  color: var(--beats-primary);
 }
 
 .subtitle {
   margin-top: 12px;
   max-width: 760px;
   font-size: 18px;
+}
+
+.statusCard {
+  margin-top: 26px;
+  padding: 18px;
+  border: 1px solid var(--beats-border);
+  border-left: 6px solid var(--beats-accent);
+  border-radius: 12px;
+  background: #fff;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--beats-muted);
+}
+
+.indexValue {
+  margin-top: 8px;
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--beats-primary);
+}
+
+.hashValue {
+  margin-top: 8px;
+  font-size: 18px;
+  font-family: var(--beats-font-mono);
+  color: var(--beats-text);
+}
+
+.curlBlock {
+  margin-top: 18px;
+  border: 1px solid var(--beats-border);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.curlTitle {
+  padding: 12px 14px;
+  font-weight: 700;
+  color: var(--beats-primary);
+  border-bottom: 1px solid var(--beats-border);
+}
+
+.code {
+  margin: 0;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #0b1225;
+  background: #f8fafc;
+  font-family: var(--beats-font-mono);
+  overflow-x: auto;
 }
 
 .endpointGrid {
@@ -33,15 +100,22 @@
   text-decoration: none;
   color: var(--beats-text);
   background: var(--beats-card-bg);
-  border: 1px solid var(--beats-card-border);
+  border: 1px solid var(--beats-border);
   border-radius: 16px;
   padding: 14px 16px;
   display: block;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.endpointCard:hover {
+  border-color: var(--beats-accent);
+  transform: translateY(-1px);
 }
 
 .endpointMethod {
   display: inline-block;
   min-width: 52px;
+  color: var(--beats-primary);
 }
 
 .endpointPath {
@@ -56,5 +130,22 @@
 
 .tierNote {
   margin-top: 20px;
-  color: var(--beats-muted-strong);
+  color: var(--beats-muted);
+}
+
+.footer {
+  margin-top: 28px;
+  padding-top: 12px;
+  border-top: 1px solid var(--beats-border);
+  color: var(--beats-muted);
+}
+
+.footer a {
+  color: var(--beats-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.footer a:hover {
+  text-decoration: underline;
 }
