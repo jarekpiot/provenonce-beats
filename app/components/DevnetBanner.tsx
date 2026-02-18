@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 const STORAGE_KEY = 'beats_devnet_banner_dismissed_v1';
 
 export function DevnetBanner() {
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(true);
 
   useEffect(() => {
     try {
@@ -39,4 +39,3 @@ export function DevnetBanner() {
     </div>
   );
 }
-
