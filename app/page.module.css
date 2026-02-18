@@ -19,8 +19,9 @@
 
 .title {
   margin: 10px 0 0;
-  font-size: 44px;
-  letter-spacing: -0.03em;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--beats-primary);
 }
 
@@ -31,15 +32,15 @@
 }
 
 .statusCard {
-  margin-top: 26px;
-  padding: 18px;
+  margin-top: 32px;
+  padding: 20px;
   border: 1px solid var(--beats-border);
-  border-left: 6px solid var(--beats-accent);
+  border-left: 4px solid var(--beats-accent);
   border-radius: 12px;
   background: #fff;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
 }
 
 .counterItem {
@@ -54,7 +55,7 @@
 }
 
 .smallValue {
-  margin-top: 8px;
+  margin-top: 6px;
   font-size: 20px;
   font-weight: 600;
   color: var(--beats-primary);
@@ -63,23 +64,24 @@
 }
 
 .indexValue {
-  margin-top: 8px;
-  font-size: 34px;
+  margin-top: 6px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--beats-primary);
   font-family: var(--beats-font-mono);
 }
 
 .hashValue {
-  margin-top: 8px;
-  font-size: 16px;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 500;
   font-family: var(--beats-font-mono);
-  color: var(--beats-text);
+  color: var(--beats-primary);
   overflow-wrap: anywhere;
 }
 
 .curlBlock {
-  margin-top: 18px;
+  margin-top: 32px;
   border: 1px solid var(--beats-border);
   border-radius: 12px;
   background: #fff;
@@ -116,7 +118,7 @@
 }
 
 .testFlow {
-  margin-top: 20px;
+  margin-top: 32px;
   padding: 16px;
   border: 1px solid var(--beats-border);
   border-radius: 12px;
@@ -164,7 +166,7 @@
 }
 
 .endpointGrid {
-  margin-top: 30px;
+  margin-top: 40px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 14px;
@@ -175,7 +177,7 @@
   color: var(--beats-text);
   background: var(--beats-card-bg);
   border: 1px solid var(--beats-border);
-  border-radius: 16px;
+  border-radius: 12px;
   padding: 14px 16px;
   display: block;
   transition: border-color 120ms ease, transform 120ms ease;
@@ -203,12 +205,12 @@
 }
 
 .tierNote {
-  margin-top: 20px;
+  margin-top: 24px;
   color: var(--beats-muted);
 }
 
 .footer {
-  margin-top: 28px;
+  margin-top: 32px;
   padding-top: 12px;
   border-top: 1px solid var(--beats-border);
   color: var(--beats-muted);
