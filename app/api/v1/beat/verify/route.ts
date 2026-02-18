@@ -34,7 +34,7 @@ export function OPTIONS() {
  * Modes:
  *   beat  - verify a single beat (full hash-chain recomputation)
  *   chain - verify a chain of beats (spot-check + linkage)
- *   proof - verify a checkin proof (strict spot-check verification)
+ *   proof - verify a checkin proof (endpoint + spot check recomputation)
  */
 export async function POST(req: NextRequest) {
   const rl = limiter.check(getClientIp(req));
@@ -190,7 +190,7 @@ export async function GET() {
     modes: {
       beat: 'Verify a single beat (full hash-chain recomputation)',
       chain: 'Verify a chain of beats (spot-check + linkage)',
-      proof: 'Verify a checkin proof (strict spot-check verification)',
+      proof: 'Verify a checkin proof (endpoint + spot check recomputation)',
     },
     difficulty: {
       default: DEFAULT_DIFFICULTY,
