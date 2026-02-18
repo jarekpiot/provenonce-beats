@@ -15,6 +15,8 @@ const ENDPOINTS = [
 export default function Home() {
   const [beatIndex, setBeatIndex] = useState<number | null>(null);
   const [beatHash, setBeatHash] = useState<string | null>(null);
+  const [difficulty, setDifficulty] = useState<number | null>(null);
+  const [nextAnchorAt, setNextAnchorAt] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -26,6 +28,8 @@ export default function Home() {
         if (!mounted) return;
         setBeatIndex(data?.anchor?.beat_index ?? null);
         setBeatHash(data?.anchor?.hash ?? null);
+        setDifficulty(data?.anchor?.difficulty ?? null);
+        setNextAnchorAt(data?.next_anchor_at ?? null);
       } catch {
         // Ignore fetch failures on homepage.
       }
@@ -58,11 +62,21 @@ export default function Home() {
         </p>
 
         <section className={styles.statusCard}>
-          <div>
+          <div className={styles.counterItem}>
             <div className={styles.label}>Live Beat Index</div>
             <div className={styles.indexValue}>{beatIndex ?? '--'}</div>
           </div>
-          <div>
+          <div className={styles.counterItem}>
+            <div className={styles.label}>Difficulty</div>
+            <div className={styles.smallValue}>{difficulty ?? '--'}</div>
+          </div>
+          <div className={styles.counterItem}>
+            <div className={styles.label}>Next Anchor (UTC)</div>
+            <div className={styles.smallValue}>
+              {nextAnchorAt ? new Date(nextAnchorAt).toISOString().replace('T', ' ').replace('Z', '') : '--'}
+            </div>
+          </div>
+          <div className={styles.counterItem}>
             <div className={styles.label}>Anchor Hash</div>
             <div className={styles.hashValue}>{beatHash ? `${beatHash.slice(0, 16)}...` : '--'}</div>
           </div>

@@ -42,11 +42,24 @@
   gap: 14px;
 }
 
+.counterItem {
+  min-width: 0;
+}
+
 .label {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--beats-muted);
+}
+
+.smallValue {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--beats-primary);
+  font-family: var(--beats-font-mono);
+  overflow-wrap: anywhere;
 }
 
 .indexValue {
@@ -58,9 +71,10 @@
 
 .hashValue {
   margin-top: 8px;
-  font-size: 18px;
+  font-size: 16px;
   font-family: var(--beats-font-mono);
   color: var(--beats-text);
+  overflow-wrap: anywhere;
 }
 
 .curlBlock {
