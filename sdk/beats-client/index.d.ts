@@ -31,6 +31,7 @@ export interface BeatAnchor {
   utc: number;
   difficulty: number;
   epoch: number;
+  tx_signature: string;
 }
 
 export interface ReceiptEnvelope {
@@ -93,4 +94,3 @@ export interface BeatsClient {
 }
 
 export declare function createBeatsClient(options?: BeatsClientOptions): BeatsClient;
-

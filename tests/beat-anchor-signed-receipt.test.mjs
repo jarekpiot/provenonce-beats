@@ -9,5 +9,5 @@ test('anchor route returns a signed receipt payload', () => {
   assert.equal(routeSource.includes('signReceipt(receiptPayload)'), true);
   assert.equal(routeSource.includes('getReceiptPublicKeyBase58()'), true);
   assert.equal(routeSource.includes('receipt:'), true);
+  assert.equal(routeSource.includes('tx_signature: latest.tx_signature'), true);
 });
-

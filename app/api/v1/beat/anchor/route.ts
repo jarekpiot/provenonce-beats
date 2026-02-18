@@ -54,6 +54,7 @@ export async function GET() {
         utc: latest.utc,
         difficulty: latest.difficulty,
         epoch: latest.epoch,
+        tx_signature: latest.tx_signature,
       },
       on_chain: {
         tx_signature: latest.tx_signature,
