@@ -16,7 +16,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export const metadata = {
   title: 'Provenonce Beats',
-  description: 'Stateless time authentication service',
+  description: 'Public clock and timestamping service anchored on Solana',
   icons: {
     icon: { url: '/logo.png', type: 'image/png' },
     shortcut: '/logo.png',
