@@ -25,3 +25,40 @@ body {
   color: var(--beats-text);
   font-family: var(--beats-font-sans);
 }
+
+.devnet-banner {
+  width: 100%;
+  border-bottom: 1px solid #bfdbfe;
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+.devnet-banner-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.devnet-banner-dismiss {
+  border: 0;
+  background: transparent;
+  color: #1e3a8a;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.devnet-banner-dismiss:hover {
+  background: #bfdbfe;
+}
+
+@media (min-width: 640px) {
+  .devnet-banner-inner {
+    font-size: 14px;
+  }
+}

@@ -1,5 +1,6 @@
 import './globals.css';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
+import { DevnetBanner } from './components/DevnetBanner';
 
 const ibmPlexSans = IBM_Plex_Sans({
   subsets: ['latin'],
@@ -21,7 +22,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>{children}</body>
+      <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>
+        <DevnetBanner />
+        {children}
+      </body>
     </html>
   );
 }
