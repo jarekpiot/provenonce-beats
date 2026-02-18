@@ -1,0 +1,60 @@
+.main {
+  min-height: 100vh;
+  padding: 56px 24px;
+  color: var(--beats-text);
+  background: var(--beats-bg);
+}
+
+.container {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.title {
+  margin: 0;
+  font-size: 44px;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  max-width: 760px;
+  font-size: 18px;
+}
+
+.endpointGrid {
+  margin-top: 30px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.endpointCard {
+  text-decoration: none;
+  color: var(--beats-text);
+  background: var(--beats-card-bg);
+  border: 1px solid var(--beats-card-border);
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: block;
+}
+
+.endpointMethod {
+  display: inline-block;
+  min-width: 52px;
+}
+
+.endpointPath {
+  font-family: var(--beats-font-mono);
+}
+
+.endpointNote {
+  margin-top: 6px;
+  color: var(--beats-muted);
+  font-size: 14px;
+}
+
+.tierNote {
+  margin-top: 20px;
+  color: var(--beats-muted-strong);
+}

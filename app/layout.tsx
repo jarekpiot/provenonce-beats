@@ -1,3 +1,5 @@
+import './globals.css';
+
 export const metadata = {
   title: 'Provenonce Beats',
   description: 'Stateless time authentication service',

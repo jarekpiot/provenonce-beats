@@ -1,0 +1,26 @@
+:root {
+  --beats-bg: radial-gradient(circle at 15% 10%, #c7f9cc 0%, rgba(199, 249, 204, 0) 35%),
+    radial-gradient(circle at 90% 15%, #fef3c7 0%, rgba(254, 243, 199, 0) 30%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  --beats-text: #0f172a;
+  --beats-muted: #475569;
+  --beats-muted-strong: #334155;
+  --beats-card-bg: #ffffffdd;
+  --beats-card-border: #dbeafe;
+  --beats-font-sans: "Space Grotesk", "Segoe UI", sans-serif;
+  --beats-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--beats-font-sans);
+}
