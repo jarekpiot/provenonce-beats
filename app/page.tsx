@@ -1,7 +1,5 @@
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
 import styles from './page.module.css';
+import { readLatestAnchorCached } from '@/lib/solana';
 
 const ENDPOINTS = [
   ['GET', '/api/health', 'service telemetry'],
@@ -12,45 +10,29 @@ const ENDPOINTS = [
   ['POST', '/api/v1/beat/timestamp', 'timestamp SHA-256 hash'],
 ] as const;
 
-export default function Home() {
-  const [beatIndex, setBeatIndex] = useState<number | null>(null);
-  const [beatHash, setBeatHash] = useState<string | null>(null);
-  const [difficulty, setDifficulty] = useState<number | null>(null);
-  const [nextAnchorAt, setNextAnchorAt] = useState<string | null>(null);
+export const dynamic = 'force-dynamic';
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const res = await fetch('/api/v1/beat/anchor', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!mounted) return;
-        setBeatIndex(data?.anchor?.beat_index ?? null);
-        setBeatHash(data?.anchor?.hash ?? null);
-        setDifficulty(data?.anchor?.difficulty ?? null);
-        setNextAnchorAt(data?.next_anchor_at ?? null);
-      } catch {
-        // Ignore fetch failures on homepage.
-      }
-    };
-    void load();
-    const id = setInterval(() => {
-      void load();
-    }, 15000);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
-  }, []);
-
-  const curlExample = useMemo(
-    () =>
-      `curl -X POST https://beats.provenonce.dev/api/v1/beat/timestamp \\
+const curlExample = `curl -X POST https://beats.provenonce.dev/api/v1/beat/timestamp \\
   -H "content-type: application/json" \\
-  -d '{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'`,
-    []
-  );
+  -d '{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'`;
+
+export default async function Home() {
+  let beatIndex: number | null = null;
+  let beatHash: string | null = null;
+  let difficulty: number | null = null;
+  let nextAnchorAt: string | null = null;
+
+  try {
+    const latest = await readLatestAnchorCached(5_000);
+    if (latest) {
+      beatIndex = latest.beat_index;
+      beatHash = latest.hash;
+      difficulty = latest.difficulty;
+      nextAnchorAt = new Date(latest.utc + 60_000).toISOString();
+    }
+  } catch {
+    // Keep homepage available even if anchor fetch fails.
+  }
 
   return (
     <main className={styles.main}>
