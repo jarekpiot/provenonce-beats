@@ -67,6 +67,7 @@
   font-size: 34px;
   font-weight: 700;
   color: var(--beats-primary);
+  font-family: var(--beats-font-mono);
 }
 
 .hashValue {

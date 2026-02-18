@@ -57,6 +57,12 @@ body {
   background: #bfdbfe;
 }
 
+:focus-visible {
+  outline: 2px solid var(--beats-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 @media (min-width: 640px) {
   .devnet-banner-inner {
     font-size: 14px;
