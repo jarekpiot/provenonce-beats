@@ -69,7 +69,7 @@ export async function GET() {
       next_anchor_at: new Date(
         latest.utc + GLOBAL_ANCHOR_INTERVAL_SEC * 1000
       ).toISOString(),
-      _info: 'NIST tells you what time it is. Provenonce tells the agent at what speed it is allowed to exist. receipt verifies response authenticity.',
+      _info: 'Anchor is the latest global beat. receipt.signature is Ed25519 over the anchor payload for offline verification.',
     }, { headers: CORS_HEADERS });
 
   } catch (err: any) {
@@ -77,3 +77,4 @@ export async function GET() {
     return NextResponse.json({ error: err.message }, { status: 500, headers: CORS_HEADERS });
   }
 }
+

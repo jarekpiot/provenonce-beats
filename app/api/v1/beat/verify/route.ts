@@ -29,10 +29,10 @@ export function OPTIONS() {
  * POST /api/v1/beat/verify
  *
  * PUBLIC - no auth required.
- * Stateless VDF proof verification.
+ * Stateless sequential-work proof verification.
  *
  * Modes:
- *   beat  - verify a single beat (full VDF recomputation)
+ *   beat  - verify a single beat (full hash-chain recomputation)
  *   chain - verify a chain of beats (spot-check + linkage)
  *   proof - verify a checkin proof (strict spot-check verification)
  */
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
         difficulty,
         hash_operations: difficulty,
         _note: valid
-          ? 'Beat verified: VDF recomputation matches claimed hash.'
+          ? 'Beat verified: hash-chain recomputation matches claimed hash.'
           : 'Beat INVALID: recomputed hash does not match.',
       }, { headers: CORS_HEADERS });
     }
@@ -162,7 +162,7 @@ export async function POST(req: NextRequest) {
         spot_checks_verified: result.spot_checks_verified || 0,
         difficulty,
         _note: result.valid
-          ? `Proof verified: ${result.spot_checks_verified || 0} spot checks passed VDF recomputation.`
+          ? `Proof verified: ${result.spot_checks_verified || 0} spot checks passed hash-chain recomputation.`
           : `Proof INVALID: ${result.reason || 'verification failed'}.`,
       }, { headers: CORS_HEADERS });
     }
@@ -183,12 +183,12 @@ export async function POST(req: NextRequest) {
  */
 export async function GET() {
   return NextResponse.json({
-    service: 'Provenonce Beats - Time Authentication',
-    description: 'Stateless public utility for verifying VDF beat proofs.',
+    service: 'Provenonce Beats',
+    description: 'Stateless public utility for verifying sequential-work beat proofs.',
     stateless: true,
     auth_required: false,
     modes: {
-      beat: 'Verify a single beat (full VDF recomputation)',
+      beat: 'Verify a single beat (full hash-chain recomputation)',
       chain: 'Verify a chain of beats (spot-check + linkage)',
       proof: 'Verify a checkin proof (strict spot-check verification)',
     },
@@ -201,7 +201,8 @@ export async function GET() {
     public_caps: {
       max_spot_checks: PUBLIC_MAX_SPOT_CHECKS,
     },
-    _note: 'Beats has no concept of identity. It authenticates time for anyone.',
+    _note: 'Beats has no concept of identity. It verifies sequential computational work for anyone.',
   }, { headers: CORS_HEADERS });
 }
+
 

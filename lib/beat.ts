@@ -2,31 +2,31 @@ import { createHash } from 'crypto';
 
 // ============================================================
 // PROVENONCE BEAT SERVICE
-// Sovereign Time Dimension for AI Agent Accountability
+// Sequential-work hash chain engine for Provenonce
 //
-// "NIST tells you what time it is.
-//  Provenonce tells the agent at what speed it is allowed to exist."
+// "NTP tells you what time it is.
+//  Provenonce tells you when the agent last proved it existed."
 // ============================================================
 
 // ============ TYPES ============
 
-/** A single Beat — one tick of the VDF hash chain */
+/** A single Beat — one tick of the sequential hash chain */
 export interface Beat {
   index: number;            // Beat number (monotonically increasing)
   hash: string;             // SHA-256 output of this beat
   prev: string;             // Previous beat's hash (chain link)
   timestamp: number;        // Wall-clock time when computed (informational, not authoritative)
   nonce?: string;           // Optional entropy (for global anchors)
-  anchor_hash?: string;     // Global anchor hash woven into VDF seed (anti-pre-computation)
+  anchor_hash?: string;     // Global anchor hash woven into beat seed (anti-pre-computation)
 }
 
-/** Global Beat Anchor — broadcast by the registry */
+/** Global Beat Anchor — published by the Beats service */
 export interface GlobalAnchor {
   beat_index: number;       // Which global beat this is
   hash: string;             // The anchor hash
   prev_hash: string;        // Previous anchor hash
-  utc: number;              // UTC timestamp for legal alignment
-  difficulty: number;       // Current VDF difficulty (hash iterations per beat)
+  utc: number;              // UTC timestamp for temporal reference
+  difficulty: number;       // Current difficulty (hash iterations per beat)
   epoch: number;            // Epoch number (difficulty adjustment period)
   signature?: string;       // Solana tx signature of anchor broadcast
 }
@@ -53,7 +53,7 @@ export interface BeatProof {
   global_anchor: number;    // Global beat index being synced to
   anchor_hash?: string;     // Global anchor hash used for all beats in this window
   // Spot-check: registry can verify any beat in the chain
-  // prev is required for VDF recomputation verification
+  // prev is required for hash-chain recomputation verification
   spot_checks?: { index: number; hash: string; prev: string; nonce?: string }[];
 }
 
@@ -104,10 +104,10 @@ export const GESTATION_DEPTH_MULTIPLIER = 1.5;
 /** Max children per gestation window */
 export const MAX_SPAWNS_PER_WINDOW = 10;
 
-// ============ VDF ENGINE ============
+// ============ SEQUENTIAL HASH CHAIN ENGINE ============
 
 /**
- * Compute a single VDF Beat.
+ * Compute a single beat.
  *
  * This is the core primitive — a sequential SHA-256 hash chain.
  * Each "beat" requires `difficulty` sequential hash operations.
@@ -136,7 +136,7 @@ export function computeBeat(
     .update(seed)
     .digest('hex');
 
-  // Sequential VDF: hash `difficulty` times
+  // Sequential hash chain: hash `difficulty` times
   for (let i = 0; i < difficulty; i++) {
     current = createHash('sha256')
       .update(current)
@@ -154,7 +154,7 @@ export function computeBeat(
 }
 
 /**
- * Verify a Beat by recomputing the VDF chain.
+ * Verify a beat by recomputing the hash chain.
  * Returns true if the beat hash matches the expected output.
  *
  * This is the key property: verification costs the same as computation.
@@ -194,7 +194,7 @@ export function computeBeats(
 /**
  * Verify a chain of Beats by spot-checking.
  * Rather than verifying every beat (expensive), we verify
- * random samples + the endpoints. If any fail, the chain is invalid.
+ * deterministically-selected samples + the endpoints. If any fail, the chain is invalid.
  */
 export function verifyBeatChain(
   beats: Beat[],
@@ -240,7 +240,7 @@ export function verifyBeatChain(
     }
   }
 
-  // Verify VDF for spot-checked beats
+  // Verify hash chain for spot-checked beats
   Array.from(toCheck).forEach(idx => {
     if (!verifyBeat(beats[idx], difficulty)) {
       failed.push(beats[idx].index);
@@ -277,8 +277,8 @@ export function createGenesisBeat(agentHash: string): Beat {
 
 /**
  * Generate a Global Anchor beat.
- * This is the "North Star" — broadcast by the registry to
- * prevent long-term drift and provide UTC legal alignment.
+ * This is the "North Star" — published by the Beats service to
+ * prevent long-term drift and provide UTC timestamp for temporal reference.
  */
 export function createGlobalAnchor(
   prevAnchor: GlobalAnchor | null,
@@ -379,7 +379,7 @@ export function createCheckinProof(
   }
 
   // Generate spot checks (random beats within the window for verification)
-  // prev and nonce are required for VDF recomputation on the verifier side
+  // prev and nonce are required for hash-chain recomputation on the verifier side
   const spotChecks: { index: number; hash: string; prev: string; nonce?: string }[] = [];
   const available = windowBeats.filter(b => b.index > fromBeat && b.index < toBeat);
 
@@ -414,7 +414,7 @@ export function createCheckinProof(
  *
  * The registry verifies:
  *   1. Structural consistency (beat count, forward progression)
- *   2. Spot-check VDF recomputation (recompute hashes to confirm work was done)
+ *   2. Spot-check hash-chain recomputation (recompute hashes to confirm work was done)
  *
  * This is the real verification — not just structure checks,
  * but actual SHA-256 chain recomputation on spot-checked beats.
@@ -456,18 +456,18 @@ export function verifyCheckinProof(
     }
   }
 
-  // Verify spot checks by recomputing VDF
+  // Verify spot checks by recomputing hash chain
   let spotChecksVerified = 0;
   for (const check of proof.spot_checks || []) {
     if (!check.hash || check.hash.length !== 64) {
       return { valid: false, reason: `Invalid hash at beat ${check.index}` };
     }
 
-    // prev is required for VDF recomputation — reject spot checks without it
+    // prev is required for hash-chain recomputation — reject spot checks without it
     if (!check.prev) {
       return {
         valid: false,
-        reason: `Spot check at beat ${check.index} missing prev hash (required for VDF verification)`,
+        reason: `Spot check at beat ${check.index} missing prev hash (required for hash-chain verification)`,
       };
     }
 
@@ -483,7 +483,7 @@ export function verifyCheckinProof(
     if (!verifyBeat(beatToVerify, difficulty)) {
       return {
         valid: false,
-        reason: `VDF verification failed at beat ${check.index}: recomputed hash does not match`,
+        reason: `Hash-chain verification failed at beat ${check.index}: recomputed hash does not match`,
       };
     }
     spotChecksVerified++;
@@ -575,3 +575,6 @@ export function formatBeat(beat: Beat | number, epoch?: number, difficulty?: num
   if (difficulty !== undefined) str += ` [D${difficulty}]`;
   return str;
 }
+
+
+
