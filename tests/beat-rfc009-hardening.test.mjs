@@ -41,5 +41,6 @@ test('receipt signing key is HKDF-derived from anchor key material', () => {
 test('api cors is centralized in middleware', () => {
   assert.equal(middlewareSource.includes("matcher: ['/api/:path*']"), true);
   assert.equal(middlewareSource.includes('Access-Control-Allow-Origin'), true);
+  assert.equal(middlewareSource.includes("req.nextUrl.pathname.startsWith('/api/cron/')"), true);
 });
 // nonce 000423

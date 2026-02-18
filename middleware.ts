@@ -8,6 +8,10 @@ const CORS_HEADERS = {
 } as const;
 
 export function middleware(req: NextRequest) {
+  if (req.nextUrl.pathname.startsWith('/api/cron/')) {
+    return NextResponse.next();
+  }
+
   if (req.method === 'OPTIONS') {
     return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -19,4 +23,3 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: ['/api/:path*'],
 };
-
