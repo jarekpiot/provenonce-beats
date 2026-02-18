@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   createGlobalAnchor,
@@ -13,6 +14,18 @@ import {
   sendAnchorMemo,
   type AnchorMemoData,
 } from '@/lib/solana';
+
+function constantTimeSecretEqual(provided: string, expected: string): boolean {
+  const providedBuf = Buffer.from(provided, 'utf8');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  if (providedBuf.length !== expectedBuf.length) {
+    const padded = Buffer.alloc(expectedBuf.length);
+    providedBuf.copy(padded, 0, 0, Math.min(providedBuf.length, expectedBuf.length));
+    timingSafeEqual(padded, expectedBuf);
+    return false;
+  }
+  return timingSafeEqual(providedBuf, expectedBuf);
+}
 
 /**
  * GET /api/cron/anchor
@@ -30,7 +43,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 503 });
   }
   const authHeader = req.headers.get('authorization');
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  if (!authHeader || !constantTimeSecretEqual(authHeader, `Bearer ${cronSecret}`)) {
     console.warn('[Cron /anchor] Unauthorized cron call');
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
