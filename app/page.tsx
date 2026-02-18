@@ -85,6 +85,8 @@ export default async function Home() {
 
         <footer className={styles.footer}>
           Part of the Provenonce network. <a href="https://provenonce.io">provenonce.io</a>
+          {' '}| Beats-only client install:{' '}
+          <a href="https://provenonce.dev/getting-started/beats-only">provenonce.dev/getting-started/beats-only</a>
         </footer>
       </div>
     </main>
