@@ -24,8 +24,10 @@ function sha256(input) {
   return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
-function computeAnchorHash(prevHash, beatIndex, utc, epoch, difficulty) {
-  const nonce = `anchor:${utc}:${epoch}`;
+function computeAnchorHash(prevHash, beatIndex, utc, epoch, difficulty, solanaEntropy) {
+  const nonce = solanaEntropy
+    ? `provenonce:anchor:v2:${utc}:${epoch}:${solanaEntropy}`
+    : `anchor:${utc}:${epoch}`;
   const seed = `${prevHash}:${beatIndex}:${nonce}`;
   let current = sha256(seed);
   for (let i = 0; i < difficulty; i++) {
@@ -375,6 +377,41 @@ test('B-3: verifyAnchorHash recomputes valid anchor hash', async () => {
     epoch,
   });
   assert.equal(valid, true, 'Should verify correctly computed hash');
+});
+
+test('B-3: verifyAnchorHash recomputes v2 anchor with solana_entropy', async () => {
+  const prevHash = 'a'.repeat(64);
+  const beatIndex = 5;
+  const utc = 1770000000000;
+  const epoch = 0;
+  const difficulty = 10;
+  const entropy = '4sGjMW1sUnHzSxGspuhpqLDx6wiyjNtZAMdL1VZHirAn';
+
+  const hash = computeAnchorHash(prevHash, beatIndex, utc, epoch, difficulty, entropy);
+
+  const client = createBeatsClient({ fetchImpl: dummyFetch });
+  const valid = await client.verifyAnchorHash({
+    beat_index: beatIndex,
+    hash,
+    prev_hash: prevHash,
+    utc,
+    difficulty,
+    epoch,
+    solana_entropy: entropy,
+  });
+  assert.equal(valid, true, 'Should verify v2 anchor with entropy');
+
+  // Tampered entropy should fail
+  const tamperedValid = await client.verifyAnchorHash({
+    beat_index: beatIndex,
+    hash,
+    prev_hash: prevHash,
+    utc,
+    difficulty,
+    epoch,
+    solana_entropy: '7Vtv8PHAsxJhPADJFnJhrg5ZASXNA2wfTbJTXzEGpump',
+  });
+  assert.equal(tamperedValid, false, 'Should reject anchor with tampered entropy');
 });
 
 test('B-3: verifyAnchorHash rejects tampered hash', async () => {

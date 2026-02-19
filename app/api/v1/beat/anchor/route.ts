@@ -35,7 +35,7 @@ export async function GET() {
       }, { headers: CORS_HEADERS });
     }
 
-    const receiptPayload = {
+    const receiptPayload: Record<string, unknown> = {
       beat_index: latest.beat_index,
       hash: latest.hash,
       prev_hash: latest.prev_hash,
@@ -44,18 +44,22 @@ export async function GET() {
       epoch: latest.epoch,
       tx_signature: latest.tx_signature,
     };
+    if (latest.solana_entropy) receiptPayload.solana_entropy = latest.solana_entropy;
     const receiptSig = signReceipt(receiptPayload);
 
+    const anchorBody: Record<string, unknown> = {
+      beat_index: latest.beat_index,
+      hash: latest.hash,
+      prev_hash: latest.prev_hash,
+      utc: latest.utc,
+      difficulty: latest.difficulty,
+      epoch: latest.epoch,
+      tx_signature: latest.tx_signature,
+    };
+    if (latest.solana_entropy) anchorBody.solana_entropy = latest.solana_entropy;
+
     return NextResponse.json({
-      anchor: {
-        beat_index: latest.beat_index,
-        hash: latest.hash,
-        prev_hash: latest.prev_hash,
-        utc: latest.utc,
-        difficulty: latest.difficulty,
-        epoch: latest.epoch,
-        tx_signature: latest.tx_signature,
-      },
+      anchor: anchorBody,
       on_chain: {
         tx_signature: latest.tx_signature,
         explorer_url: getExplorerUrl(latest.tx_signature),

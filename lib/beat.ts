@@ -28,8 +28,16 @@ export interface GlobalAnchor {
   utc: number;              // UTC timestamp for temporal reference
   difficulty: number;       // Current difficulty (hash iterations per beat)
   epoch: number;            // Epoch number (difficulty adjustment period)
+  solana_entropy?: string;  // A-4: Finalized Solana blockhash (base58) injected as external entropy
   signature?: string;       // Solana tx signature of anchor broadcast
 }
+
+/**
+ * A-4: Domain prefix for anchor hash computation.
+ * Even though full domain separation (A-3) is deferred, we bind anchor
+ * hashes to this prefix now so the input tuple is unambiguous.
+ */
+export const ANCHOR_DOMAIN_PREFIX = 'provenonce:anchor:v2';
 
 /** Local Beat Chain — maintained by each agent */
 export interface LocalBeatChain {
@@ -279,18 +287,29 @@ export function createGenesisBeat(agentHash: string): Beat {
  * Generate a Global Anchor beat.
  * This is the "North Star" — published by the Beats service to
  * prevent long-term drift and provide UTC timestamp for temporal reference.
+ *
+ * A-4: solanaEntropy is a finalized Solana blockhash (base58 string) that
+ * binds the anchor to chain state unknowable before it exists, preventing
+ * offline pre-computation of future anchors.
  */
 export function createGlobalAnchor(
   prevAnchor: GlobalAnchor | null,
   difficulty: number = DEFAULT_DIFFICULTY,
   epoch: number = 0,
+  solanaEntropy?: string,
 ): GlobalAnchor {
   const index = prevAnchor ? prevAnchor.beat_index + 1 : 0;
   const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_SEED, 'utf8').digest('hex');
   const utc = Date.now();
 
-  // Anchor nonce includes UTC for legal binding
-  const nonce = `anchor:${utc}:${epoch}`;
+  // A-4: Canonical anchor-hash input tuple:
+  //   ANCHOR_DOMAIN_PREFIX || prev_hash || beat_index (decimal ASCII) || utc || epoch || solana_entropy
+  // solana_entropy is the base58-encoded finalized Solana blockhash.
+  // beat_index serialized as explicit decimal ASCII (not fixed-width binary)
+  // to maintain compatibility with existing SHA-256 text-mode hashing.
+  const nonce = solanaEntropy
+    ? `${ANCHOR_DOMAIN_PREFIX}:${utc}:${epoch}:${solanaEntropy}`
+    : `anchor:${utc}:${epoch}`;
   const beat = computeBeat(prevHash, index, difficulty, nonce);
 
   return {
@@ -300,14 +319,18 @@ export function createGlobalAnchor(
     utc,
     difficulty,
     epoch,
+    solana_entropy: solanaEntropy,
   };
 }
 
 /**
  * Verify a Global Anchor.
+ * A-4: If solana_entropy is present, uses the v2 domain-prefixed nonce.
  */
 export function verifyGlobalAnchor(anchor: GlobalAnchor): boolean {
-  const nonce = `anchor:${anchor.utc}:${anchor.epoch}`;
+  const nonce = anchor.solana_entropy
+    ? `${ANCHOR_DOMAIN_PREFIX}:${anchor.utc}:${anchor.epoch}:${anchor.solana_entropy}`
+    : `anchor:${anchor.utc}:${anchor.epoch}`;
   const beat = computeBeat(anchor.prev_hash, anchor.beat_index, anchor.difficulty, nonce);
   return beat.hash === anchor.hash;
 }

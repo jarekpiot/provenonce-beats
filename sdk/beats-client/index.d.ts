@@ -64,6 +64,8 @@ export interface BeatAnchor {
   difficulty: number;
   epoch: number;
   tx_signature: string;
+  /** A-4: Finalized Solana blockhash used as external entropy. Present on v2 anchors. */
+  solana_entropy?: string;
 }
 
 export interface ReceiptEnvelope {

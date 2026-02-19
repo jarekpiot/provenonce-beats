@@ -12,6 +12,7 @@ import {
 import {
   readLatestAnchor,
   sendAnchorMemo,
+  getFinalizedBlockhash,
   type AnchorMemoData,
 } from '@/lib/solana';
 
@@ -80,9 +81,20 @@ export async function GET(req: NextRequest) {
       epoch: latest.epoch,
     } : null;
 
+    // A-4: Fetch finalized Solana blockhash as external entropy.
+    // Fail closed: if entropy is unavailable, do NOT advance the anchor head.
+    const solanaEntropy = await getFinalizedBlockhash();
+    if (!solanaEntropy) {
+      console.error('[Cron /anchor] Failed to fetch Solana blockhash — refusing to advance anchor (fail-closed)');
+      return NextResponse.json(
+        { ok: false, error: 'Solana entropy unavailable — anchor not advanced' },
+        { status: 503 }
+      );
+    }
+
     const epoch = prevAnchor ? prevAnchor.epoch : 0;
     const difficulty = prevAnchor ? prevAnchor.difficulty : DEFAULT_DIFFICULTY;
-    const newAnchor = createGlobalAnchor(prevAnchor, difficulty, epoch);
+    const newAnchor = createGlobalAnchor(prevAnchor, difficulty, epoch, solanaEntropy);
 
     // Write to Solana — this IS the persistence
     const anchorMemo: AnchorMemoData = {
@@ -94,6 +106,7 @@ export async function GET(req: NextRequest) {
       utc: newAnchor.utc,
       difficulty: newAnchor.difficulty,
       epoch: newAnchor.epoch,
+      solana_entropy: solanaEntropy,
     };
 
     const { signature } = await sendAnchorMemo(anchorMemo);

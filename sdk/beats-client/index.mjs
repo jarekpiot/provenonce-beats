@@ -79,7 +79,11 @@ async function verifyEd25519(payload, signatureBase64, publicKey) {
  * Recompute an anchor's hash from its fields (B-3).
  * Requires Node.js crypto — not available in browsers.
  * Returns true if the recomputed hash matches anchor.hash.
+ *
+ * A-4: If solana_entropy is present, uses the v2 domain-prefixed nonce.
  */
+const ANCHOR_DOMAIN_PREFIX = 'provenonce:anchor:v2';
+
 async function recomputeAnchorHash(anchor) {
   if (!anchor || !HEX64.test(anchor.hash) || !HEX64.test(anchor.prev_hash)) return false;
   if (!Number.isInteger(anchor.beat_index) || anchor.beat_index < 0) return false;
@@ -88,7 +92,10 @@ async function recomputeAnchorHash(anchor) {
   if (!Number.isInteger(anchor.epoch) || anchor.epoch < 0) return false;
 
   const { createHash } = await import('node:crypto');
-  const nonce = `anchor:${anchor.utc}:${anchor.epoch}`;
+  // A-4: v2 nonce includes solana_entropy; legacy nonce for pre-A4 anchors
+  const nonce = anchor.solana_entropy
+    ? `${ANCHOR_DOMAIN_PREFIX}:${anchor.utc}:${anchor.epoch}:${anchor.solana_entropy}`
+    : `anchor:${anchor.utc}:${anchor.epoch}`;
   const seed = `${anchor.prev_hash}:${anchor.beat_index}:${nonce}`;
   let current = createHash('sha256').update(seed, 'utf8').digest('hex');
   for (let i = 0; i < anchor.difficulty; i++) {

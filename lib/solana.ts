@@ -100,6 +100,7 @@ export interface AnchorMemoData {
   utc: number;
   difficulty: number;
   epoch: number;
+  solana_entropy?: string;  // A-4: finalized blockhash used as external entropy
 }
 
 export interface TimestampMemoData {
@@ -149,6 +150,24 @@ export function signReceipt(payload: Record<string, unknown>): { signature_base6
   const message = Buffer.from(canonicalJson(payload), 'utf8');
   const signature = sign(null, message, privateKey);
   return { signature_base64: signature.toString('base64') };
+}
+
+// ============ A-4: EXTERNAL ENTROPY ============
+
+/**
+ * Fetch a finalized Solana blockhash for use as external entropy in anchor derivation.
+ * Commitment level: 'finalized' — highest consensus, cannot be rolled back.
+ * Returns the base58-encoded blockhash string, or null on failure.
+ */
+export async function getFinalizedBlockhash(): Promise<string | null> {
+  try {
+    const connection = getConnection();
+    const { blockhash } = await connection.getLatestBlockhash('finalized');
+    return blockhash; // base58-encoded 32-byte hash
+  } catch (err: any) {
+    console.error('[Solana] getFinalizedBlockhash failed:', err.message);
+    return null;
+  }
 }
 
 // ============ WRITE ANCHOR TO SOLANA ============
@@ -229,6 +248,7 @@ export async function readLatestAnchor(): Promise<
       utc: parsed.utc,
       difficulty: parsed.difficulty,
       epoch: parsed.epoch,
+      solana_entropy: parsed.solana_entropy,
       signature: sig.signature,
       tx_signature: sig.signature,
     });
