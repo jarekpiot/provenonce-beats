@@ -1,3 +1,9 @@
+export interface ContinuityState {
+  beat_index: number;
+  hash: string;
+  agent_id: string | null;
+}
+
 export interface BeatsClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -5,6 +11,12 @@ export interface BeatsClientOptions {
   pinnedPublicKey?: string | null;
   /** Request timeout in milliseconds (B-5). Default: 30000. */
   timeoutMs?: number;
+  /** Callback when continuity state changes. Persist this for restart recovery. */
+  onStateChange?: (state: ContinuityState) => void;
+  /** Load persisted continuity state on startup. */
+  loadState?: () => ContinuityState | null;
+  /** Agent ID for scoping persisted state. */
+  agentId?: string | null;
 }
 
 export interface VerifyOnChainOptions {
@@ -120,10 +132,14 @@ export interface BeatsClient {
   /** Verify on-chain tx status and optionally SPL Memo content (B-4). */
   verifyOnChain(txSignature: string, opts?: VerifyOnChainOptions): Promise<VerifyOnChainResult>;
 
-  /** Set last known anchor for continuity tracking (B-2). */
+  /** Set last known anchor for continuity tracking (B-2). Throws if chain is broken. */
   setLastKnownAnchor(anchor: BeatAnchor): void;
   /** Get last known anchor (B-2). Returns null if no anchor has been seen. */
   getLastKnownAnchor(): BeatAnchor | null;
+  /** Re-establish chain continuity after a break. Requires explicit operator action. */
+  resync(anchor: BeatAnchor): void;
+  /** Returns true if chain continuity is broken and resync() is required. */
+  isBroken(): boolean;
 
   /** Internal: resolve public key from cache or auto-fetch. */
   _resolveKey(): Promise<string | null>;

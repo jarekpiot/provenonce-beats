@@ -180,6 +180,9 @@ export function createBeatsClient({
   fetchImpl = globalThis.fetch,
   pinnedPublicKey = null,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  onStateChange = null,
+  loadState = null,
+  agentId = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('fetch implementation is required');
@@ -190,6 +193,24 @@ export function createBeatsClient({
 
   // B-2: Anchor continuity state
   let _lastAnchor = null;
+  let _broken = false;
+  let _breakReason = null;
+
+  // Load persisted continuity state
+  if (typeof loadState === 'function') {
+    const saved = loadState();
+    if (saved && typeof saved.beat_index === 'number' && HEX64.test(saved.hash)) {
+      if (!agentId || saved.agent_id === agentId) {
+        _lastAnchor = { beat_index: saved.beat_index, hash: saved.hash };
+      }
+    }
+  }
+
+  function _persistState(anchor) {
+    if (typeof onStateChange === 'function' && anchor) {
+      onStateChange({ beat_index: anchor.beat_index, hash: anchor.hash, agent_id: agentId || null });
+    }
+  }
 
   // Internal fetch with timeout (B-5)
   const fetchWithTimeout = async (url, init = {}) => {
@@ -232,12 +253,21 @@ export function createBeatsClient({
 
     // ---- Anchor (with continuity tracking B-2) ----
     async getAnchor(opts = {}) {
+      // Fail closed if chain is broken
+      if (_broken) {
+        const err = new Error(`Chain continuity broken: ${_breakReason}. Call resync() to re-establish.`);
+        err.code = 'CHAIN_BROKEN';
+        throw err;
+      }
+
       const data = await request('/api/v1/beat/anchor');
       const anchor = data?.anchor;
 
-      // B-2: Continuity validation against last known anchor
+      // B-2: Strict continuity validation against last known anchor
       if (anchor && _lastAnchor) {
         if (anchor.beat_index < _lastAnchor.beat_index) {
+          _broken = true;
+          _breakReason = `regression from ${_lastAnchor.beat_index} to ${anchor.beat_index}`;
           const err = new Error(
             `Anchor chain regression: server returned beat_index ${anchor.beat_index}, ` +
             `but last known was ${_lastAnchor.beat_index}`
@@ -245,9 +275,23 @@ export function createBeatsClient({
           err.code = 'ANCHOR_REGRESSION';
           throw err;
         }
-        // If consecutive, prev_hash must link
-        if (anchor.beat_index === _lastAnchor.beat_index + 1) {
+        // Same beat_index: must be same hash (idempotent re-fetch)
+        if (anchor.beat_index === _lastAnchor.beat_index) {
+          if (anchor.hash !== _lastAnchor.hash) {
+            _broken = true;
+            _breakReason = `fork at beat_index ${anchor.beat_index}: hash changed`;
+            const err = new Error(
+              `Anchor chain fork at beat_index ${anchor.beat_index}: ` +
+              `hash ${anchor.hash} differs from last known ${_lastAnchor.hash}`
+            );
+            err.code = 'ANCHOR_FORK';
+            throw err;
+          }
+        } else if (anchor.beat_index === _lastAnchor.beat_index + 1) {
+          // Consecutive: prev_hash must link
           if (anchor.prev_hash !== _lastAnchor.hash) {
+            _broken = true;
+            _breakReason = `prev_hash mismatch at beat_index ${anchor.beat_index}`;
             const err = new Error(
               `Anchor chain break at beat_index ${anchor.beat_index}: ` +
               `prev_hash ${anchor.prev_hash} does not match last known hash ${_lastAnchor.hash}`
@@ -255,6 +299,16 @@ export function createBeatsClient({
             err.code = 'ANCHOR_CHAIN_BREAK';
             throw err;
           }
+        } else {
+          // Non-consecutive jump: fail closed
+          _broken = true;
+          _breakReason = `beat_index jumped from ${_lastAnchor.beat_index} to ${anchor.beat_index}`;
+          const err = new Error(
+            `Anchor chain jump: beat_index ${anchor.beat_index} is not consecutive ` +
+            `(expected ${_lastAnchor.beat_index + 1})`
+          );
+          err.code = 'ANCHOR_JUMP';
+          throw err;
         }
       }
 
@@ -272,8 +326,11 @@ export function createBeatsClient({
         data._verified_hash = true;
       }
 
-      // Update continuity state
-      if (anchor) _lastAnchor = { ...anchor };
+      // Update continuity state + persist
+      if (anchor && (!_lastAnchor || anchor.beat_index > _lastAnchor.beat_index)) {
+        _lastAnchor = { ...anchor };
+        _persistState(_lastAnchor);
+      }
 
       return data;
     },
@@ -376,13 +433,31 @@ export function createBeatsClient({
 
     // ---- Continuity State (B-2) ----
     setLastKnownAnchor(anchor) {
+      if (_broken) {
+        throw new Error('Chain is broken. Call resync() to re-establish continuity.');
+      }
       if (anchor && typeof anchor.beat_index === 'number' && HEX64.test(anchor.hash)) {
         _lastAnchor = { ...anchor };
+        _persistState(_lastAnchor);
       }
     },
 
     getLastKnownAnchor() {
       return _lastAnchor ? { ..._lastAnchor } : null;
+    },
+
+    resync(anchor) {
+      if (!anchor || typeof anchor.beat_index !== 'number' || !HEX64.test(anchor.hash)) {
+        throw new Error('resync requires a valid anchor with beat_index and hash');
+      }
+      _broken = false;
+      _breakReason = null;
+      _lastAnchor = { ...anchor };
+      _persistState(_lastAnchor);
+    },
+
+    isBroken() {
+      return _broken;
     },
 
     // ---- Internal: Key Resolution (B-1) ----

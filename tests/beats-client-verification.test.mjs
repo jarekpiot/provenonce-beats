@@ -213,12 +213,11 @@ test('B-2: getAnchor detects chain break on consecutive anchors', async () => {
   );
 });
 
-test('B-2: getAnchor allows non-consecutive forward jumps', async () => {
+test('B-2: getAnchor rejects non-consecutive forward jumps', async () => {
   let callCount = 0;
   const anchors = [
     { beat_index: 10, hash: 'a'.repeat(64), prev_hash: '9'.repeat(64), utc: 1770000000000, difficulty: 100, epoch: 0 },
     { beat_index: 15, hash: 'b'.repeat(64), prev_hash: 'e'.repeat(64), utc: 1770000300000, difficulty: 100, epoch: 0 },
-    // jump from 10 to 15 — allowed (client may have missed 11-14)
   ];
 
   const fetchImpl = async () => ({
@@ -231,8 +230,12 @@ test('B-2: getAnchor allows non-consecutive forward jumps', async () => {
 
   const client = createBeatsClient({ fetchImpl });
   await client.getAnchor(); // 10
-  const second = await client.getAnchor(); // 15 — non-consecutive, allowed
-  assert.equal(second.anchor.beat_index, 15, 'Should accept forward jump');
+  await assert.rejects(
+    () => client.getAnchor(), // 15 — non-consecutive, rejected
+    { message: /jump/i },
+    'Should reject beat_index jump'
+  );
+  assert.equal(client.isBroken(), true, 'Client should be broken after jump');
 });
 
 test('B-2: setLastKnownAnchor seeds continuity state', async () => {
@@ -250,6 +253,105 @@ test('B-2: setLastKnownAnchor seeds continuity state', async () => {
   const last = client.getLastKnownAnchor();
   assert.equal(last.beat_index, 50);
   assert.equal(last.hash, 'a'.repeat(64));
+});
+
+// ============ B-2: PERSISTENCE + FAIL-CLOSED ============
+
+test('B-2: restart loads persisted state and continues correctly', async () => {
+  let savedState = null;
+  const onStateChange = (s) => { savedState = { ...s }; };
+
+  const anchor10 = { beat_index: 10, hash: 'a'.repeat(64), prev_hash: '9'.repeat(64), utc: 1770000000000, difficulty: 100, epoch: 0 };
+  const anchor11 = { beat_index: 11, hash: 'b'.repeat(64), prev_hash: 'a'.repeat(64), utc: 1770000060000, difficulty: 100, epoch: 0 };
+
+  // Session 1: establish state at beat_index 10
+  const client1 = createBeatsClient({
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({ anchor: anchor10, on_chain: { tx_signature: null } }),
+    }),
+    onStateChange,
+  });
+  await client1.getAnchor();
+  assert.deepEqual(savedState, { beat_index: 10, hash: 'a'.repeat(64), agent_id: null });
+
+  // Session 2: new client loads saved state, continues from beat_index 11
+  const client2 = createBeatsClient({
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({ anchor: anchor11, on_chain: { tx_signature: null } }),
+    }),
+    loadState: () => savedState,
+    onStateChange,
+  });
+  const result = await client2.getAnchor();
+  assert.equal(result.anchor.beat_index, 11);
+  assert.deepEqual(savedState, { beat_index: 11, hash: 'b'.repeat(64), agent_id: null });
+});
+
+test('B-2: prev_hash mismatch fails closed until explicit resync', async () => {
+  let callCount = 0;
+  const anchors = [
+    { beat_index: 10, hash: 'a'.repeat(64), prev_hash: '9'.repeat(64), utc: 1770000000000, difficulty: 100, epoch: 0 },
+    { beat_index: 11, hash: 'b'.repeat(64), prev_hash: 'x'.repeat(64), utc: 1770000060000, difficulty: 100, epoch: 0 },
+  ];
+
+  const fetchImpl = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({
+      anchor: anchors[Math.min(callCount++, 1)],
+      on_chain: { tx_signature: null },
+    }),
+  });
+
+  const client = createBeatsClient({ fetchImpl });
+  await client.getAnchor(); // 10 OK
+
+  // 11 with wrong prev_hash — breaks chain
+  await assert.rejects(() => client.getAnchor(), { message: /chain break/i });
+  assert.equal(client.isBroken(), true, 'Client should be broken');
+
+  // Further calls fail with CHAIN_BROKEN (no silent recovery)
+  await assert.rejects(() => client.getAnchor(), { message: /broken/i });
+
+  // setLastKnownAnchor also blocked while broken
+  assert.throws(
+    () => client.setLastKnownAnchor({ beat_index: 11, hash: 'b'.repeat(64) }),
+    { message: /broken/i },
+  );
+
+  // Explicit resync clears the broken state
+  client.resync({ beat_index: 11, hash: 'b'.repeat(64), prev_hash: 'a'.repeat(64), utc: 1770000060000, difficulty: 100, epoch: 0 });
+  assert.equal(client.isBroken(), false, 'Should be cleared after resync');
+});
+
+test('B-2: beat_index jump fails closed', async () => {
+  let callCount = 0;
+  const anchors = [
+    { beat_index: 10, hash: 'a'.repeat(64), prev_hash: '9'.repeat(64), utc: 1770000000000, difficulty: 100, epoch: 0 },
+    { beat_index: 15, hash: 'b'.repeat(64), prev_hash: 'e'.repeat(64), utc: 1770000300000, difficulty: 100, epoch: 0 },
+  ];
+
+  const fetchImpl = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({
+      anchor: anchors[callCount++],
+      on_chain: { tx_signature: null },
+    }),
+  });
+
+  const client = createBeatsClient({ fetchImpl });
+  await client.getAnchor(); // 10 OK
+
+  // Jump to 15 — fails closed
+  await assert.rejects(
+    () => client.getAnchor(),
+    { message: /jump/i },
+  );
+  assert.equal(client.isBroken(), true, 'Client should be broken after jump');
+
+  // Stays broken until explicit resync
+  await assert.rejects(() => client.getAnchor(), { message: /broken/i });
 });
 
 // ============ B-3: ANCHOR HASH RECOMPUTATION ============
