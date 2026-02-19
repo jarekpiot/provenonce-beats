@@ -7,6 +7,7 @@ const beat = await import('../lib/beat.ts');
 const {
   createGlobalAnchor,
   verifyGlobalAnchor,
+  computeAnchorHashV3,
   ANCHOR_DOMAIN_PREFIX,
   DEFAULT_DIFFICULTY,
 } = beat;
@@ -78,10 +79,10 @@ test('A-4: legacy anchor (no entropy) still verifies', () => {
   assert.equal(verifyGlobalAnchor(legacy), true, 'Legacy anchor must still verify');
 });
 
-test('A-4: v2 anchor with entropy verifies', () => {
-  const v2 = createGlobalAnchor(null, 10, 0, ENTROPY_A);
-  assert.equal(v2.solana_entropy, ENTROPY_A);
-  assert.equal(verifyGlobalAnchor(v2), true, 'V2 anchor with entropy must verify');
+test('V3: anchor with entropy verifies', () => {
+  const v3 = createGlobalAnchor(null, 10, 0, ENTROPY_A);
+  assert.equal(v3.solana_entropy, ENTROPY_A);
+  assert.equal(verifyGlobalAnchor(v3), true, 'V3 anchor with entropy must verify');
 });
 
 // ============ 5d: Commitment level is 'finalized' ============
@@ -105,16 +106,57 @@ test('A-4: Solana connection uses finalized commitment', async () => {
 
 // ============ Domain prefix ============
 
-test('A-4: ANCHOR_DOMAIN_PREFIX is defined and used', () => {
-  assert.equal(ANCHOR_DOMAIN_PREFIX, 'provenonce:anchor:v2');
+test('V3: ANCHOR_DOMAIN_PREFIX is PROVENONCE_BEATS_V1', () => {
+  assert.equal(ANCHOR_DOMAIN_PREFIX, 'PROVENONCE_BEATS_V1');
+  assert.equal(Buffer.from(ANCHOR_DOMAIN_PREFIX, 'utf8').length, 19, 'Domain prefix must be 19 bytes');
+});
 
-  // Verify that entropy-bearing anchors use the domain prefix in their nonce
+test('V3: entropy anchor uses binary formula (no difficulty iteration)', () => {
   const anchor = createGlobalAnchor(null, 10, 0, ENTROPY_A);
-  // The domain prefix is embedded in the nonce which is embedded in computeBeat's seed.
-  // We can't inspect the nonce directly, but we can verify that changing the prefix
-  // (via a forged anchor with legacy nonce but entropy field) fails verification.
-  const forged = { ...anchor };
-  // If someone tried to verify with the legacy nonce format but included entropy,
-  // verification would fail — the domain prefix is cryptographically bound.
-  assert.equal(verifyGlobalAnchor(forged), true, 'Correct anchor verifies');
+  assert.equal(verifyGlobalAnchor(anchor), true, 'V3 anchor must verify');
+  assert.equal(anchor.solana_entropy, ENTROPY_A);
+});
+
+// ============ V3 Binary Formula Tests ============
+
+test('V3: computeAnchorHashV3 is deterministic', () => {
+  const prevHash = 'a'.repeat(64);
+  const h1 = computeAnchorHashV3(prevHash, 100, ENTROPY_A);
+  const h2 = computeAnchorHashV3(prevHash, 100, ENTROPY_A);
+  assert.equal(h1, h2, 'Same inputs must produce same hash');
+  assert.match(h1, /^[0-9a-f]{64}$/, 'Must be valid hex hash');
+});
+
+test('V3: different entropy produces different hash', () => {
+  const prevHash = 'a'.repeat(64);
+  const h1 = computeAnchorHashV3(prevHash, 100, ENTROPY_A);
+  const h2 = computeAnchorHashV3(prevHash, 100, ENTROPY_B);
+  assert.notEqual(h1, h2, 'Different entropy must produce different hash');
+});
+
+test('V3: different beat_index produces different hash', () => {
+  const prevHash = 'a'.repeat(64);
+  const h1 = computeAnchorHashV3(prevHash, 100, ENTROPY_A);
+  const h2 = computeAnchorHashV3(prevHash, 101, ENTROPY_A);
+  assert.notEqual(h1, h2, 'Different beat_index must produce different hash');
+});
+
+test('V3: different prev_hash produces different hash', () => {
+  const h1 = computeAnchorHashV3('a'.repeat(64), 100, ENTROPY_A);
+  const h2 = computeAnchorHashV3('b'.repeat(64), 100, ENTROPY_A);
+  assert.notEqual(h1, h2, 'Different prev_hash must produce different hash');
+});
+
+test('V3: tampered entropy field detected on verify', () => {
+  const anchor = createGlobalAnchor(null, 10, 0, ENTROPY_A);
+  const tampered = { ...anchor, solana_entropy: ENTROPY_B };
+  assert.equal(verifyGlobalAnchor(tampered), false, 'Tampered entropy must fail verification');
+});
+
+test('V3: v3 hash differs from what v1 legacy would produce', () => {
+  // V3 uses binary formula; v1 uses string formula. They must differ.
+  const prevA = createGlobalAnchor(null, 10, 0, ENTROPY_A);
+  const prevB = createGlobalAnchor(null, 10, 0);
+  // Both start from same genesis seed, but formula differs
+  assert.notEqual(prevA.hash, prevB.hash, 'V3 and V1 must produce different hashes');
 });

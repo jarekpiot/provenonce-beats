@@ -24,10 +24,44 @@ function sha256(input) {
   return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
+const BASE58_ALPHABET_TEST = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58DecodeTest(str) {
+  const map = {};
+  for (let i = 0; i < BASE58_ALPHABET_TEST.length; i++) map[BASE58_ALPHABET_TEST[i]] = i;
+  let bytes = [0];
+  for (let i = 0; i < str.length; i++) {
+    const val = map[str[i]];
+    if (val === undefined) throw new Error('invalid base58 character');
+    let carry = val;
+    for (let j = 0; j < bytes.length; j++) {
+      const x = bytes[j] * 58 + carry;
+      bytes[j] = x & 0xff;
+      carry = x >> 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  for (let i = 0; i < str.length && str[i] === '1'; i++) bytes.push(0);
+  return Buffer.from(bytes.reverse());
+}
+
 function computeAnchorHash(prevHash, beatIndex, utc, epoch, difficulty, solanaEntropy) {
-  const nonce = solanaEntropy
-    ? `provenonce:anchor:v2:${utc}:${epoch}:${solanaEntropy}`
-    : `anchor:${utc}:${epoch}`;
+  if (solanaEntropy) {
+    // V3: binary-canonical single SHA-256
+    const prefix = Buffer.from('PROVENONCE_BEATS_V1', 'utf8');
+    const prev = Buffer.from(prevHash, 'hex');
+    const idx = Buffer.alloc(8);
+    idx.writeUInt32BE(Math.floor(beatIndex / 0x100000000), 0);
+    idx.writeUInt32BE(beatIndex >>> 0, 4);
+    const entropy = base58DecodeTest(solanaEntropy);
+    const preimage = Buffer.concat([prefix, prev, idx, entropy]);
+    return createHash('sha256').update(preimage).digest('hex');
+  }
+  // V1 legacy
+  const nonce = `anchor:${utc}:${epoch}`;
   const seed = `${prevHash}:${beatIndex}:${nonce}`;
   let current = sha256(seed);
   for (let i = 0; i < difficulty; i++) {

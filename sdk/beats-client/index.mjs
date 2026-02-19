@@ -77,12 +77,33 @@ async function verifyEd25519(payload, signatureBase64, publicKey) {
 
 /**
  * Recompute an anchor's hash from its fields (B-3).
- * Requires Node.js crypto — not available in browsers.
- * Returns true if the recomputed hash matches anchor.hash.
- *
- * A-4: If solana_entropy is present, uses the v2 domain-prefixed nonce.
+ * V3: If solana_entropy is present, uses binary-canonical single SHA-256.
+ * V1 legacy: string-based hash with difficulty iteration (Node.js only).
  */
-const ANCHOR_DOMAIN_PREFIX = 'provenonce:anchor:v2';
+const ANCHOR_DOMAIN_PREFIX = 'PROVENONCE_BEATS_V1';
+
+function hexToUint8Array(hex) {
+  const arr = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < arr.length; i++) {
+    arr[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return arr;
+}
+
+function u64beBytes(n) {
+  const buf = new Uint8Array(8);
+  const hi = Math.floor(n / 0x100000000);
+  const lo = n >>> 0;
+  buf[0] = (hi >>> 24) & 0xff;
+  buf[1] = (hi >>> 16) & 0xff;
+  buf[2] = (hi >>> 8) & 0xff;
+  buf[3] = hi & 0xff;
+  buf[4] = (lo >>> 24) & 0xff;
+  buf[5] = (lo >>> 16) & 0xff;
+  buf[6] = (lo >>> 8) & 0xff;
+  buf[7] = lo & 0xff;
+  return buf;
+}
 
 async function recomputeAnchorHash(anchor) {
   if (!anchor || !HEX64.test(anchor.hash) || !HEX64.test(anchor.prev_hash)) return false;
@@ -91,11 +112,41 @@ async function recomputeAnchorHash(anchor) {
   if (!Number.isInteger(anchor.utc) || anchor.utc < 0) return false;
   if (!Number.isInteger(anchor.epoch) || anchor.epoch < 0) return false;
 
+  if (anchor.solana_entropy) {
+    // V3: binary-canonical single SHA-256
+    const prefix = new TextEncoder().encode(ANCHOR_DOMAIN_PREFIX);    // 19 bytes
+    const prev = hexToUint8Array(anchor.prev_hash);                    // 32 bytes
+    const idx = u64beBytes(anchor.beat_index);                         // 8 bytes
+    const entropy = decodeBase58(anchor.solana_entropy);               // 32 bytes
+
+    const preimage = new Uint8Array(prefix.length + prev.length + idx.length + entropy.length);
+    preimage.set(prefix, 0);
+    preimage.set(prev, prefix.length);
+    preimage.set(idx, prefix.length + prev.length);
+    preimage.set(entropy, prefix.length + prev.length + idx.length);
+
+    // Web Crypto path
+    const subtle = globalThis.crypto?.subtle;
+    if (subtle) {
+      try {
+        const digest = await subtle.digest('SHA-256', preimage);
+        const hashArr = Array.from(new Uint8Array(digest));
+        const computed = hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
+        return computed === anchor.hash;
+      } catch {
+        // Fall through to Node.js
+      }
+    }
+
+    // Node.js fallback
+    const { createHash } = await import('node:crypto');
+    const computed = createHash('sha256').update(preimage).digest('hex');
+    return computed === anchor.hash;
+  }
+
+  // V1 legacy: string-based hash with difficulty iteration
   const { createHash } = await import('node:crypto');
-  // A-4: v2 nonce includes solana_entropy; legacy nonce for pre-A4 anchors
-  const nonce = anchor.solana_entropy
-    ? `${ANCHOR_DOMAIN_PREFIX}:${anchor.utc}:${anchor.epoch}:${anchor.solana_entropy}`
-    : `anchor:${anchor.utc}:${anchor.epoch}`;
+  const nonce = `anchor:${anchor.utc}:${anchor.epoch}`;
   const seed = `${anchor.prev_hash}:${anchor.beat_index}:${nonce}`;
   let current = createHash('sha256').update(seed, 'utf8').digest('hex');
   for (let i = 0; i < anchor.difficulty; i++) {

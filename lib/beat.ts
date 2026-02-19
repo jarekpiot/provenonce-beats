@@ -33,11 +33,10 @@ export interface GlobalAnchor {
 }
 
 /**
- * A-4: Domain prefix for anchor hash computation.
- * Even though full domain separation (A-3) is deferred, we bind anchor
- * hashes to this prefix now so the input tuple is unambiguous.
+ * V3 binary-canonical domain prefix for anchor hash computation.
+ * UTF-8 encoded as the first 19 bytes of the preimage.
  */
-export const ANCHOR_DOMAIN_PREFIX = 'provenonce:anchor:v2';
+export const ANCHOR_DOMAIN_PREFIX = 'PROVENONCE_BEATS_V1';
 
 /** Local Beat Chain — maintained by each agent */
 export interface LocalBeatChain {
@@ -281,6 +280,71 @@ export function createGenesisBeat(agentHash: string): Beat {
   };
 }
 
+// ============ V3 BINARY HELPERS (private) ============
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+/** Decode a hex string to a Buffer. */
+function hexToBytes(hex: string): Buffer {
+  return Buffer.from(hex, 'hex');
+}
+
+/** Encode a number as 8-byte big-endian (u64be). */
+function u64be(n: number): Buffer {
+  const buf = Buffer.alloc(8);
+  // Write as two 32-bit big-endian values (JS safe integers fit in 53 bits)
+  buf.writeUInt32BE(Math.floor(n / 0x100000000), 0);
+  buf.writeUInt32BE(n >>> 0, 4);
+  return buf;
+}
+
+/** Decode a base58 string to a Buffer. */
+function base58Decode(str: string): Buffer {
+  const map: Record<string, number> = {};
+  for (let i = 0; i < BASE58_ALPHABET.length; i++) map[BASE58_ALPHABET[i]] = i;
+  let bytes = [0];
+  for (let i = 0; i < str.length; i++) {
+    const val = map[str[i]];
+    if (val === undefined) throw new Error('invalid base58 character');
+    let carry = val;
+    for (let j = 0; j < bytes.length; j++) {
+      const x = bytes[j] * 58 + carry;
+      bytes[j] = x & 0xff;
+      carry = x >> 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  for (let i = 0; i < str.length && str[i] === '1'; i++) bytes.push(0);
+  return Buffer.from(bytes.reverse());
+}
+
+/**
+ * V3 binary-canonical anchor hash.
+ * Single SHA-256 over a fixed-layout 91-byte preimage:
+ *   UTF8("PROVENONCE_BEATS_V1")  (19 bytes)
+ *   hex_decode(prev_hash)         (32 bytes)
+ *   u64be(beat_index)             (8 bytes)
+ *   base58_decode(solana_entropy) (32 bytes)
+ *
+ * No difficulty iteration — single hash pass.
+ */
+export function computeAnchorHashV3(
+  prevHash: string,
+  beatIndex: number,
+  solanaEntropy: string,
+): string {
+  const prefix = Buffer.from(ANCHOR_DOMAIN_PREFIX, 'utf8');  // 19 bytes
+  const prev = hexToBytes(prevHash);                          // 32 bytes
+  const idx = u64be(beatIndex);                               // 8 bytes
+  const entropy = base58Decode(solanaEntropy);                // 32 bytes
+
+  const preimage = Buffer.concat([prefix, prev, idx, entropy]);
+  return createHash('sha256').update(preimage).digest('hex');
+}
+
 // ============ GLOBAL ANCHOR ============
 
 /**
@@ -288,9 +352,8 @@ export function createGenesisBeat(agentHash: string): Beat {
  * This is the "North Star" — published by the Beats service to
  * prevent long-term drift and provide UTC timestamp for temporal reference.
  *
- * A-4: solanaEntropy is a finalized Solana blockhash (base58 string) that
- * binds the anchor to chain state unknowable before it exists, preventing
- * offline pre-computation of future anchors.
+ * V3: When solanaEntropy is present, uses binary-canonical hash (single SHA-256,
+ * no difficulty iteration). When absent, falls back to v1 legacy string formula.
  */
 export function createGlobalAnchor(
   prevAnchor: GlobalAnchor | null,
@@ -302,19 +365,20 @@ export function createGlobalAnchor(
   const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_SEED, 'utf8').digest('hex');
   const utc = Date.now();
 
-  // A-4: Canonical anchor-hash input tuple:
-  //   ANCHOR_DOMAIN_PREFIX || prev_hash || beat_index (decimal ASCII) || utc || epoch || solana_entropy
-  // solana_entropy is the base58-encoded finalized Solana blockhash.
-  // beat_index serialized as explicit decimal ASCII (not fixed-width binary)
-  // to maintain compatibility with existing SHA-256 text-mode hashing.
-  const nonce = solanaEntropy
-    ? `${ANCHOR_DOMAIN_PREFIX}:${utc}:${epoch}:${solanaEntropy}`
-    : `anchor:${utc}:${epoch}`;
-  const beat = computeBeat(prevHash, index, difficulty, nonce);
+  let hash: string;
+  if (solanaEntropy) {
+    // V3: binary-canonical hash — single SHA-256, no difficulty iteration
+    hash = computeAnchorHashV3(prevHash, index, solanaEntropy);
+  } else {
+    // V1 legacy: string-based hash with difficulty iteration
+    const nonce = `anchor:${utc}:${epoch}`;
+    const beat = computeBeat(prevHash, index, difficulty, nonce);
+    hash = beat.hash;
+  }
 
   return {
     beat_index: index,
-    hash: beat.hash,
+    hash,
     prev_hash: prevHash,
     utc,
     difficulty,
@@ -325,12 +389,17 @@ export function createGlobalAnchor(
 
 /**
  * Verify a Global Anchor.
- * A-4: If solana_entropy is present, uses the v2 domain-prefixed nonce.
+ * V3: If solana_entropy is present, uses binary-canonical single SHA-256.
+ * Otherwise falls back to v1 legacy string formula.
  */
 export function verifyGlobalAnchor(anchor: GlobalAnchor): boolean {
-  const nonce = anchor.solana_entropy
-    ? `${ANCHOR_DOMAIN_PREFIX}:${anchor.utc}:${anchor.epoch}:${anchor.solana_entropy}`
-    : `anchor:${anchor.utc}:${anchor.epoch}`;
+  if (anchor.solana_entropy) {
+    // V3: binary-canonical verification
+    const expected = computeAnchorHashV3(anchor.prev_hash, anchor.beat_index, anchor.solana_entropy);
+    return expected === anchor.hash;
+  }
+  // V1 legacy: string-based verification with difficulty iteration
+  const nonce = `anchor:${anchor.utc}:${anchor.epoch}`;
   const beat = computeBeat(anchor.prev_hash, anchor.beat_index, anchor.difficulty, nonce);
   return beat.hash === anchor.hash;
 }
