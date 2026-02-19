@@ -133,13 +133,13 @@ export function computeBeat(
     : `${prevHash}:${beatIndex}:${nonce || ''}`;
 
   let current = createHash('sha256')
-    .update(seed)
+    .update(seed, 'utf8')
     .digest('hex');
 
   // Sequential hash chain: hash `difficulty` times
   for (let i = 0; i < difficulty; i++) {
     current = createHash('sha256')
-      .update(current)
+      .update(current, 'utf8')
       .digest('hex');
   }
 
@@ -227,7 +227,7 @@ export function verifyBeatChain(
       toCheck.add(Math.floor((3 * beats.length) / 4));
     }
     while (toCheck.size < wanted) {
-      material = createHash('sha256').update(material).digest('hex');
+      material = createHash('sha256').update(material, 'utf8').digest('hex');
       const idx = parseInt(material.slice(0, 8), 16) % beats.length;
       toCheck.add(idx);
     }
@@ -263,7 +263,7 @@ export function verifyBeatChain(
  */
 export function createGenesisBeat(agentHash: string): Beat {
   const genesisInput = `${BEAT_GENESIS_SEED}:${agentHash}`;
-  const genesisHash = createHash('sha256').update(genesisInput).digest('hex');
+  const genesisHash = createHash('sha256').update(genesisInput, 'utf8').digest('hex');
 
   return {
     index: 0,
@@ -286,7 +286,7 @@ export function createGlobalAnchor(
   epoch: number = 0,
 ): GlobalAnchor {
   const index = prevAnchor ? prevAnchor.beat_index + 1 : 0;
-  const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_SEED).digest('hex');
+  const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_SEED, 'utf8').digest('hex');
   const utc = Date.now();
 
   // Anchor nonce includes UTC for legal binding
@@ -518,7 +518,7 @@ export function createResyncChallenge(
 
   // Challenge nonce prevents replay attacks
   const challengeNonce = createHash('sha256')
-    .update(`resync:${agentHash}:${lastKnownBeat.hash}:${currentGlobalAnchor.hash}:${Date.now()}`)
+    .update(`resync:${agentHash}:${lastKnownBeat.hash}:${currentGlobalAnchor.hash}:${Date.now()}`, 'utf8')
     .digest('hex');
 
   return {
