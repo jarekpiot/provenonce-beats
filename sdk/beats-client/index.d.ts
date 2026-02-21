@@ -57,6 +57,8 @@ export interface HealthResponse {
 }
 
 export interface BeatAnchor {
+  /** Receipt type discriminator. Present on receipts signed by server v1.0+. */
+  type?: 'anchor';
   beat_index: number;
   hash: string;
   prev_hash: string;
@@ -90,6 +92,8 @@ export interface AnchorResponse {
 }
 
 export interface TimestampPayload {
+  /** Receipt type discriminator. Present on receipts signed by server v1.0+. */
+  type?: 'timestamp';
   hash: string;
   anchor_index: number;
   anchor_hash: string;

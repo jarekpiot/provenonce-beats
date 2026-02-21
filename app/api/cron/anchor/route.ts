@@ -5,7 +5,9 @@ import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   createGlobalAnchor,
+  adjustDifficulty,
   GLOBAL_ANCHOR_INTERVAL_SEC,
+  EPOCH_LENGTH,
   DEFAULT_DIFFICULTY,
   type GlobalAnchor,
 } from '@/lib/beat';
@@ -92,8 +94,21 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const epoch = prevAnchor ? prevAnchor.epoch : 0;
-    const difficulty = prevAnchor ? prevAnchor.difficulty : DEFAULT_DIFFICULTY;
+    // Compute next beat index to check epoch boundary
+    const nextBeatIndex = prevAnchor ? prevAnchor.beat_index + 1 : 0;
+
+    let epoch = prevAnchor ? prevAnchor.epoch : 0;
+    let difficulty = prevAnchor ? prevAnchor.difficulty : DEFAULT_DIFFICULTY;
+
+    // Epoch boundary: advance epoch and adjust difficulty based on actual anchor interval
+    if (prevAnchor && nextBeatIndex % EPOCH_LENGTH === 0) {
+      const actualIntervalMs = now - prevAnchor.utc;
+      const targetIntervalMs = GLOBAL_ANCHOR_INTERVAL_SEC * 1000;
+      difficulty = adjustDifficulty(difficulty, actualIntervalMs, targetIntervalMs);
+      epoch = epoch + 1;
+      console.log(`[Cron /anchor] Epoch ${epoch} started at beat #${nextBeatIndex}, new difficulty=${difficulty} (actual=${actualIntervalMs}ms, target=${targetIntervalMs}ms)`);
+    }
+
     const newAnchor = createGlobalAnchor(prevAnchor, difficulty, epoch, solanaEntropy);
 
     // Write to Solana — this IS the persistence

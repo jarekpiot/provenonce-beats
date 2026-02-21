@@ -75,8 +75,8 @@ export interface GestationRequirement {
 
 // ============ CONSTANTS ============
 
-/** Genesis seed — the "Big Bang" of Beat time */
-export const BEAT_GENESIS_SEED = 'provenonce:beat:genesis:v1:2026';
+/** Genesis domain prefix — the "Big Bang" of Beat time. Generic default; callers may override. */
+export const BEAT_GENESIS_PREFIX = 'beats:genesis:v1:';
 
 /** Default difficulty: hash iterations per beat */
 export const DEFAULT_DIFFICULTY = 1000;
@@ -268,8 +268,8 @@ export function verifyBeatChain(
  * Derived deterministically from the agent's registration hash.
  * This is the "birth" of the agent's timeline.
  */
-export function createGenesisBeat(agentHash: string): Beat {
-  const genesisInput = `${BEAT_GENESIS_SEED}:${agentHash}`;
+export function createGenesisBeat(agentHash: string, domainPrefix: string = BEAT_GENESIS_PREFIX): Beat {
+  const genesisInput = `${domainPrefix}${agentHash}`;
   const genesisHash = createHash('sha256').update(genesisInput, 'utf8').digest('hex');
 
   return {
@@ -362,7 +362,7 @@ export function createGlobalAnchor(
   solanaEntropy?: string,
 ): GlobalAnchor {
   const index = prevAnchor ? prevAnchor.beat_index + 1 : 0;
-  const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_SEED, 'utf8').digest('hex');
+  const prevHash = prevAnchor?.hash || createHash('sha256').update(BEAT_GENESIS_PREFIX, 'utf8').digest('hex');
   const utc = Date.now();
 
   let hash: string;

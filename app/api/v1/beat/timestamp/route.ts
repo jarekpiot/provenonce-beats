@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
     const { signature } = await sendAnchorMemo(memo);
 
     const receiptPayload = {
+      type: 'timestamp' as const,
       hash: hashRaw,
       anchor_index: anchor.beat_index,
       anchor_hash: anchor.hash,

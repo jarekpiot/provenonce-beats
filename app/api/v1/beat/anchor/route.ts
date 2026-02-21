@@ -36,6 +36,7 @@ export async function GET() {
     }
 
     const receiptPayload: Record<string, unknown> = {
+      type: 'anchor',
       beat_index: latest.beat_index,
       hash: latest.hash,
       prev_hash: latest.prev_hash,
@@ -48,6 +49,7 @@ export async function GET() {
     const receiptSig = signReceipt(receiptPayload);
 
     const anchorBody: Record<string, unknown> = {
+      type: 'anchor',
       beat_index: latest.beat_index,
       hash: latest.hash,
       prev_hash: latest.prev_hash,
