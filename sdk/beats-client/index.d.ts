@@ -138,14 +138,19 @@ export interface SpotCheck {
 }
 
 export interface WorkProofRequest {
-  from_beat: number;
-  to_beat: number;
+  /** Start-of-chain hash (64 hex). Caller-provided; included in signed receipt. */
   from_hash: string;
+  /** End-of-chain hash (64 hex). Caller-provided; included in signed receipt. */
   to_hash: string;
+  /** Number of beats in the work window. */
   beats_computed: number;
+  /** Hash iterations per beat. Must be >= 100 (MIN_DIFFICULTY). */
   difficulty: number;
+  /** Global anchor index referenced. Must be within grace window of current tip. */
   anchor_index: number;
+  /** Anchor hash woven into beat computation (64 hex). */
   anchor_hash?: string;
+  /** Random samples from the hash chain for spot-check recomputation. Min 3, max 25. */
   spot_checks: SpotCheck[];
 }
 
@@ -155,20 +160,28 @@ export interface WorkProofReceiptPayload {
   difficulty: number;
   anchor_index: number;
   anchor_hash: string | null;
-  utc: number;
+  /** Start-of-chain hash as claimed by caller. */
+  from_hash: string;
+  /** End-of-chain hash as claimed by caller. */
+  to_hash: string;
+  /** ISO 8601 server timestamp. */
+  utc: string;
+  /** Base64 Ed25519 signature over canonical JSON of all other fields. */
+  signature: string;
 }
 
-export interface WorkProofResponse {
-  ok: boolean;
-  valid: boolean;
-  receipt?: WorkProofReceiptPayload;
-  signature?: string;
-  public_key?: string;
-  spot_checks_verified?: number;
-  reason?: string;
-  failed_indices?: number[];
-  _note?: string;
+export interface WorkProofSuccessResponse {
+  valid: true;
+  receipt: WorkProofReceiptPayload;
 }
+
+export interface WorkProofFailureResponse {
+  valid: false;
+  reason: 'spot_check_failed' | 'stale_anchor' | 'insufficient_difficulty'
+        | 'count_mismatch' | 'insufficient_spot_checks' | string;
+}
+
+export type WorkProofResponse = WorkProofSuccessResponse | WorkProofFailureResponse;
 
 export interface KeyInfo {
   public_key_base58: string;
@@ -217,6 +230,8 @@ export interface BeatsClient {
 
   /**
    * Submit a work proof to the Beats service and receive a signed receipt.
+   *
+   * The request is wrapped in { work_proof: ... } before sending.
    * The receipt certifies N beats at difficulty D anchored to a global beat.
    * Policy-free: the caller (Registry or any consumer) decides what N means.
    */
@@ -224,10 +239,15 @@ export interface BeatsClient {
 
   /**
    * Verify a work-proof receipt signature offline.
+   *
+   * Extracts the embedded signature from receipt.signature, then verifies
+   * the rest of the receipt payload using the work_proof HKDF key.
+   * HKDF context: "provenonce:beats:work-proof:v1"
+   *
    * Uses the work_proof key from GET /api/v1/beat/key (distinct from timestamp key).
    */
   verifyWorkProofReceipt(
-    receiptResponse: WorkProofResponse,
+    receiptResponse: WorkProofSuccessResponse,
     opts?: { publicKey?: string },
   ): Promise<boolean>;
 

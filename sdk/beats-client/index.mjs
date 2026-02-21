@@ -536,43 +536,53 @@ export function createBeatsClient({
     /**
      * Submit a work proof to the Beats service and receive a signed receipt.
      *
-     * @param {object} proof
-     *   @param {number}   proof.from_beat      Starting beat index
-     *   @param {number}   proof.to_beat        Ending beat index
-     *   @param {string}   proof.from_hash      Hash at from_beat (64 hex)
-     *   @param {string}   proof.to_hash        Hash at to_beat (64 hex)
-     *   @param {number}   proof.beats_computed to_beat - from_beat
-     *   @param {number}   proof.difficulty     Hash iterations per beat
-     *   @param {number}   proof.anchor_index   Global anchor index woven in
-     *   @param {string}   [proof.anchor_hash]  Anchor hash woven in (64 hex)
-     *   @param {Array}    proof.spot_checks    Spot-checked beats for verification
-     *     @param {number}  .index              Beat index
-     *     @param {string}  .hash               Hash at this beat (64 hex)
-     *     @param {string}  .prev               Previous hash (64 hex)
-     *     @param {string}  [.nonce]            Optional nonce
+     * The request is wrapped in a { work_proof: ... } envelope.
      *
-     * @returns {Promise<WorkProofResponse>}
+     * @param {object} proof
+     *   @param {string}   proof.from_hash      Start-of-chain hash (64 hex)
+     *   @param {string}   proof.to_hash        End-of-chain hash (64 hex)
+     *   @param {number}   proof.beats_computed Number of beats in window
+     *   @param {number}   proof.difficulty     Hash iterations per beat (>= 100)
+     *   @param {number}   proof.anchor_index   Global anchor index referenced
+     *   @param {string}   [proof.anchor_hash]  Anchor hash woven into beats (64 hex)
+     *   @param {Array}    proof.spot_checks    Spot-checked beats for recomputation
+     *     @param {number}  .index              Beat index (absolute, as used in computeBeat)
+     *     @param {string}  .hash               Hash at this beat (64 hex)
+     *     @param {string}  .prev               Previous beat hash (64 hex)
+     *     @param {string}  [.nonce]            Optional nonce used in computation
+     *
+     * @returns {Promise<{ valid: true, receipt: WorkProofReceiptPayload }
+     *                  | { valid: false, reason: string }>}
      */
     submitWorkProof(proof) {
       return request('/api/v1/beat/work-proof', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(proof),
+        body: JSON.stringify({ work_proof: proof }),
       });
     },
 
     /**
-     * Verify a work-proof receipt signature (offline).
-     * Uses the work_proof key from GET /api/v1/beat/key, not the timestamp key.
+     * Verify a work-proof receipt signature offline.
+     *
+     * The signature is embedded inside receipt.signature.
+     * Verification extracts the signature and verifies the rest of the
+     * receipt payload using the work_proof HKDF key.
+     *
+     * Uses the work_proof key from GET /api/v1/beat/key (distinct from timestamp key).
+     * HKDF context: "provenonce:beats:work-proof:v1"
      *
      * @param {object} receiptResponse  The full response from submitWorkProof()
      * @param {object} [opts]
      *   @param {string} [opts.publicKey]  Override: hex or base58 work-proof public key
      */
     async verifyWorkProofReceipt(receiptResponse, opts = {}) {
-      const payload = receiptResponse?.receipt;
-      const signature = receiptResponse?.signature;
-      if (!payload || !signature) return false;
+      const receipt = receiptResponse?.receipt;
+      if (!receipt || typeof receipt !== 'object') return false;
+
+      // Signature is embedded inside the receipt — extract it
+      const { signature, ...payload } = receipt;
+      if (!signature || typeof signature !== 'string') return false;
 
       // Resolve work-proof public key: param > cached from /key endpoint
       let key = opts.publicKey;

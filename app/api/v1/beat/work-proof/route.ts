@@ -1,9 +1,10 @@
+export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
+
 import { NextRequest, NextResponse } from 'next/server';
 import {
   verifyBeat,
-  DEFAULT_DIFFICULTY,
   MIN_DIFFICULTY,
-  MAX_DIFFICULTY,
   ANCHOR_HASH_GRACE_WINDOW,
   type Beat,
 } from '@/lib/beat';
@@ -14,21 +15,25 @@ import {
 } from '@/lib/solana';
 import { RateLimiter, getClientIp, rateLimitResponse } from '@/lib/rate-limit';
 
-export const maxDuration = 30;
-
 const limiter = new RateLimiter({ maxRequests: 10, windowMs: 60 * 1000 });
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
   'Access-Control-Allow-Headers': 'Content-Type',
 } as const;
 
 const PUBLIC_MAX_DIFFICULTY = 5000;
 const PUBLIC_MAX_SPOT_CHECKS = 25;
+const MIN_SPOT_CHECKS = 3;
+
 const HEX64 = /^[0-9a-f]{64}$/i;
 
 export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
+function invalid(reason: string) {
+  return NextResponse.json({ valid: false, reason }, { headers: CORS_HEADERS });
 }
 
 /**
@@ -42,28 +47,29 @@ export function OPTIONS() {
  * The caller (Registry or any consumer) decides what N means for
  * their use case.
  *
- * Request body:
- *   from_beat     integer  Starting beat index
- *   to_beat       integer  Ending beat index (exclusive upper bound)
- *   from_hash     hex64    Hash at from_beat
- *   to_hash       hex64    Hash at to_beat
- *   beats_computed integer to_beat - from_beat
- *   difficulty    integer  Hash iterations per beat
- *   anchor_index  integer  Global anchor index woven into beats
- *   anchor_hash   hex64    (optional) Anchor hash woven into beats
- *   spot_checks   array    Spot-checked beats for verification
- *     .index      integer  Beat index
- *     .hash       hex64    Hash at this beat
- *     .prev       hex64    Previous beat hash (required for recomputation)
- *     .nonce      string   (optional) Nonce used in this beat
+ * Request body (two equivalent forms):
+ *   { work_proof: { from_hash, to_hash, beats_computed, difficulty,
+ *                   anchor_index, anchor_hash?, spot_checks[] } }
+ *   -- OR flat (backward compat) --
+ *   { from_hash, to_hash, beats_computed, difficulty,
+ *     anchor_index, anchor_hash?, spot_checks[] }
+ *
+ * spot_checks entries: { index, hash, prev, nonce? }
  *
  * Signed receipt payload:
  *   type          "work_proof"
- *   beats_verified  integer  Beats confirmed by spot-check
+ *   beats_verified  integer  Beats claimed (not independently counted)
  *   difficulty    integer
  *   anchor_index  integer
  *   anchor_hash   string | null
- *   utc           integer  Server timestamp (Unix ms)
+ *   from_hash     string   Start-of-chain hash (caller's claim)
+ *   to_hash       string   End-of-chain hash (caller's claim)
+ *   utc           string   ISO 8601 server timestamp
+ *
+ * Receipt signature (Ed25519) covers canonical JSON of the payload.
+ * The signature is embedded in the receipt object returned to the caller.
+ * Signing key: HKDF("provenonce:beats:work-proof:v1") from anchor keypair.
+ * Verify using the work_proof key from GET /api/v1/beat/key.
  */
 export async function POST(req: NextRequest) {
   const rl = limiter.check(getClientIp(req));
@@ -91,29 +97,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Structural validation ──────────────────────────────────────────
+  // Accept both { work_proof: {...} } wrapper and flat body (backward compat)
+  const wp = body?.work_proof ?? body;
 
-  const fromBeat = body?.from_beat;
-  const toBeat = body?.to_beat;
-  const fromHash = typeof body?.from_hash === 'string' ? body.from_hash.toLowerCase() : '';
-  const toHash = typeof body?.to_hash === 'string' ? body.to_hash.toLowerCase() : '';
-  const beatsComputed = body?.beats_computed;
-  const anchorIndex = body?.anchor_index;
-  const anchorHash = typeof body?.anchor_hash === 'string' ? body.anchor_hash.toLowerCase() : undefined;
-  const spotChecks: unknown[] = Array.isArray(body?.spot_checks) ? body.spot_checks : [];
+  // ── Required field extraction ────────────────────────────────────────
 
-  if (!Number.isInteger(fromBeat) || fromBeat < 0) {
-    return NextResponse.json(
-      { error: 'from_beat must be a non-negative integer' },
-      { status: 400, headers: CORS_HEADERS },
-    );
-  }
-  if (!Number.isInteger(toBeat) || toBeat <= fromBeat) {
-    return NextResponse.json(
-      { error: 'to_beat must be an integer greater than from_beat' },
-      { status: 400, headers: CORS_HEADERS },
-    );
-  }
+  const fromHash = typeof wp?.from_hash === 'string' ? wp.from_hash.toLowerCase() : '';
+  const toHash = typeof wp?.to_hash === 'string' ? wp.to_hash.toLowerCase() : '';
+  const beatsComputed = wp?.beats_computed;
+  const anchorIndex = wp?.anchor_index;
+  const anchorHash = typeof wp?.anchor_hash === 'string' ? wp.anchor_hash.toLowerCase() : undefined;
+  const spotChecks: unknown[] = Array.isArray(wp?.spot_checks) ? wp.spot_checks : [];
+
+  // ── Structural validation (400 for malformed requests) ───────────────
+
   if (!HEX64.test(fromHash)) {
     return NextResponse.json(
       { error: 'from_hash must be 64 lowercase hex characters' },
@@ -126,9 +123,9 @@ export async function POST(req: NextRequest) {
       { status: 400, headers: CORS_HEADERS },
     );
   }
-  if (!Number.isInteger(beatsComputed) || beatsComputed !== toBeat - fromBeat) {
+  if (!Number.isInteger(beatsComputed) || beatsComputed < 1) {
     return NextResponse.json(
-      { error: `beats_computed must equal to_beat - from_beat (expected ${toBeat - fromBeat})` },
+      { error: 'beats_computed must be a positive integer' },
       { status: 400, headers: CORS_HEADERS },
     );
   }
@@ -144,13 +141,6 @@ export async function POST(req: NextRequest) {
       { status: 400, headers: CORS_HEADERS },
     );
   }
-
-  // Clamp difficulty to safe range
-  const rawDifficulty = Number(body?.difficulty ?? DEFAULT_DIFFICULTY);
-  const difficulty = Number.isFinite(rawDifficulty)
-    ? Math.min(Math.max(Math.floor(rawDifficulty), MIN_DIFFICULTY), PUBLIC_MAX_DIFFICULTY)
-    : DEFAULT_DIFFICULTY;
-
   if (spotChecks.length === 0) {
     return NextResponse.json(
       { error: 'spot_checks must be a non-empty array' },
@@ -164,17 +154,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Spot-check shape validation ────────────────────────────────────
+  // ── Spot-check shape validation ──────────────────────────────────────
 
   for (let i = 0; i < spotChecks.length; i++) {
     const sc = spotChecks[i] as any;
-    if (
-      !Number.isInteger(sc?.index) ||
-      sc.index < fromBeat ||
-      sc.index > toBeat
-    ) {
+    if (!Number.isInteger(sc?.index) || sc.index < 0) {
       return NextResponse.json(
-        { error: `spot_checks[${i}].index must be an integer in [from_beat, to_beat]` },
+        { error: `spot_checks[${i}].index must be a non-negative integer` },
         { status: 400, headers: CORS_HEADERS },
       );
     }
@@ -186,23 +172,37 @@ export async function POST(req: NextRequest) {
     }
     if (!HEX64.test(String(sc?.prev ?? ''))) {
       return NextResponse.json(
-        { error: `spot_checks[${i}].prev must be 64 hex characters (required for recomputation)` },
+        { error: `spot_checks[${i}].prev must be 64 hex characters` },
         { status: 400, headers: CORS_HEADERS },
       );
     }
   }
 
-  // M-4: spot_checks must include the final beat (to_beat) so the claimed
-  // to_hash is actually verified by recomputation.
-  const hasEndpoint = (spotChecks as any[]).some(sc => sc.index === toBeat);
-  if (!hasEndpoint) {
-    return NextResponse.json(
-      { error: `spot_checks must include to_beat (index ${toBeat}) to verify the final hash` },
-      { status: 400, headers: CORS_HEADERS },
-    );
+  // ── Logic validation (200 with valid:false) ──────────────────────────
+
+  // Difficulty: reject if below minimum. Caller must use the right difficulty.
+  const rawDifficulty = Number(wp?.difficulty ?? 0);
+  if (!Number.isFinite(rawDifficulty) || !Number.isInteger(rawDifficulty) || rawDifficulty < MIN_DIFFICULTY) {
+    return invalid('insufficient_difficulty');
+  }
+  const difficulty = Math.min(rawDifficulty, PUBLIC_MAX_DIFFICULTY);
+
+  // Minimum spot checks: at least MIN_SPOT_CHECKS (or beats_computed if chain is tiny)
+  const minRequired = Math.min(MIN_SPOT_CHECKS, beatsComputed);
+  if (spotChecks.length < minRequired) {
+    return invalid('insufficient_spot_checks');
   }
 
-  // ── Anchor freshness check ─────────────────────────────────────────
+  // Count mismatch: span of spot-check indices must not exceed beats_computed.
+  // Allows chains starting at any index — only the window width is checked.
+  const scIndices = (spotChecks as any[]).map((sc) => sc.index as number);
+  const minScIndex = Math.min(...scIndices);
+  const maxScIndex = Math.max(...scIndices);
+  if (maxScIndex - minScIndex > beatsComputed) {
+    return invalid('count_mismatch');
+  }
+
+  // ── Anchor freshness check ───────────────────────────────────────────
 
   let currentAnchor: any;
   try {
@@ -213,49 +213,15 @@ export async function POST(req: NextRequest) {
 
   if (currentAnchor) {
     const ageDelta = currentAnchor.beat_index - anchorIndex;
-    if (ageDelta > ANCHOR_HASH_GRACE_WINDOW) {
-      return NextResponse.json(
-        {
-          ok: true,
-          valid: false,
-          reason: `anchor_index ${anchorIndex} is too stale (current is ${currentAnchor.beat_index}, grace window is ${ANCHOR_HASH_GRACE_WINDOW})`,
-        },
-        { headers: CORS_HEADERS },
-      );
-    }
-    if (anchorIndex > currentAnchor.beat_index) {
-      return NextResponse.json(
-        {
-          ok: true,
-          valid: false,
-          reason: `anchor_index ${anchorIndex} is in the future (current is ${currentAnchor.beat_index})`,
-        },
-        { headers: CORS_HEADERS },
-      );
+    if (ageDelta > ANCHOR_HASH_GRACE_WINDOW || anchorIndex > currentAnchor.beat_index) {
+      return invalid('stale_anchor');
     }
   }
-  // If no anchor available (service cold-start), skip freshness check and
-  // accept the proof. Callers bear the risk of stale anchors in degraded state.
+  // If no anchor available (cold-start), skip freshness and accept the proof.
 
-  // ── Minimum spot-check count ───────────────────────────────────────
-
-  const minRequired = Math.min(3, beatsComputed);
-  if (spotChecks.length < minRequired) {
-    return NextResponse.json(
-      {
-        ok: true,
-        valid: false,
-        reason: `Insufficient spot checks: provided ${spotChecks.length}, need at least ${minRequired}`,
-      },
-      { headers: CORS_HEADERS },
-    );
-  }
-
-  // ── Hash-chain recomputation ───────────────────────────────────────
+  // ── Hash-chain recomputation ─────────────────────────────────────────
 
   const failed: number[] = [];
-  let spotChecksVerified = 0;
-
   for (const sc of spotChecks as any[]) {
     const beat: Beat = {
       index: sc.index,
@@ -267,52 +233,43 @@ export async function POST(req: NextRequest) {
     };
     if (!verifyBeat(beat, difficulty)) {
       failed.push(sc.index);
-    } else {
-      spotChecksVerified++;
     }
   }
 
   if (failed.length > 0) {
-    return NextResponse.json(
-      {
-        ok: true,
-        valid: false,
-        reason: `Hash-chain verification failed at beat ${failed[0]}: recomputed hash does not match`,
-        failed_indices: failed,
-      },
-      { headers: CORS_HEADERS },
-    );
+    return invalid('spot_check_failed');
   }
 
-  // ── Sign the work-proof receipt ────────────────────────────────────
+  // ── Sign the work-proof receipt ──────────────────────────────────────
 
-  const utc = Date.now();
+  const utc = new Date().toISOString();
   const receiptPayload: Record<string, unknown> = {
     type: 'work_proof',
     beats_verified: beatsComputed,
     difficulty,
     anchor_index: anchorIndex,
     anchor_hash: anchorHash ?? null,
+    from_hash: fromHash,
+    to_hash: toHash,
     utc,
   };
+
   const { signature_base64 } = signWorkProofReceipt(receiptPayload);
 
   console.info('[beat/work-proof] verified', {
     beats: beatsComputed,
     difficulty,
     anchor_index: anchorIndex,
-    spot_checks: spotChecksVerified,
+    spot_checks: spotChecks.length,
   });
 
   return NextResponse.json(
     {
-      ok: true,
       valid: true,
-      receipt: receiptPayload,
-      signature: signature_base64,
-      public_key: getWorkProofPublicKeyBase58(),
-      spot_checks_verified: spotChecksVerified,
-      _note: 'Receipt is signed with the Beats work-proof key (distinct from timestamp key). Verify using public_key from GET /api/v1/beat/key.',
+      receipt: {
+        ...receiptPayload,
+        signature: signature_base64,
+      },
     },
     { headers: CORS_HEADERS },
   );
@@ -336,11 +293,24 @@ export async function GET() {
       receipt_type: 'work_proof',
       signing_context: 'provenonce:beats:work-proof:v1',
       public_caps: {
-        max_spot_checks: PUBLIC_MAX_SPOT_CHECKS,
+        min_difficulty: MIN_DIFFICULTY,
         max_difficulty: PUBLIC_MAX_DIFFICULTY,
+        min_spot_checks: MIN_SPOT_CHECKS,
+        max_spot_checks: PUBLIC_MAX_SPOT_CHECKS,
         anchor_grace_window: ANCHOR_HASH_GRACE_WINDOW,
       },
-      _note: 'Verify the receipt signature using the work_proof public key from GET /api/v1/beat/key.',
+      receipt_format: {
+        type: 'work_proof',
+        beats_verified: 'integer — beats claimed (spot-checks verified)',
+        difficulty: 'integer',
+        anchor_index: 'integer',
+        anchor_hash: 'string | null',
+        from_hash: 'string — caller-provided start hash',
+        to_hash: 'string — caller-provided end hash',
+        utc: 'string — ISO 8601 server timestamp',
+        signature: 'string — base64 Ed25519 over canonical JSON of fields above',
+      },
+      _note: 'Verify the receipt signature using the work_proof key from GET /api/v1/beat/key.',
     },
     { headers: CORS_HEADERS },
   );
