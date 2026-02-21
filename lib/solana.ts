@@ -15,6 +15,7 @@ import { parseAnchorMemo, selectCanonicalAnchor } from './anchor-canonical.js';
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 const RECEIPT_SIGNING_KEY_INFO = Buffer.from('provenonce:beats:timestamp-receipt:v1', 'utf8');
+const WORK_PROOF_SIGNING_KEY_INFO = Buffer.from('provenonce:beats:work-proof:v1', 'utf8');
 
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const SOLANA_CLUSTER = getSolanaClusterFromRpcUrl(SOLANA_RPC_URL);
@@ -147,6 +148,33 @@ export function getReceiptPublicKeyBase58(): string {
 
 export function signReceipt(payload: Record<string, unknown>): { signature_base64: string } {
   const privateKey = getReceiptPrivateKey();
+  const message = Buffer.from(canonicalJson(payload), 'utf8');
+  const signature = sign(null, message, privateKey);
+  return { signature_base64: signature.toString('base64') };
+}
+
+// ============ WORK-PROOF SIGNING (separate HKDF context) ============
+
+function getWorkProofPrivateKey() {
+  const keypair = getAnchorKeypair();
+  const anchorSeed = Buffer.from(keypair.secretKey.slice(0, 32));
+  const derivedSeed = hkdfSync('sha256', anchorSeed, Buffer.alloc(0), WORK_PROOF_SIGNING_KEY_INFO, 32);
+  const privKeyDer = Buffer.concat([ED25519_PKCS8_PREFIX, Buffer.from(derivedSeed)]);
+  return createPrivateKey({ key: privKeyDer, format: 'der', type: 'pkcs8' });
+}
+
+export function getWorkProofPublicKeyHex(): string {
+  const privateKey = getWorkProofPrivateKey();
+  const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+  return Buffer.from(spki).subarray(-32).toString('hex');
+}
+
+export function getWorkProofPublicKeyBase58(): string {
+  return bs58.encode(Buffer.from(getWorkProofPublicKeyHex(), 'hex'));
+}
+
+export function signWorkProofReceipt(payload: Record<string, unknown>): { signature_base64: string } {
+  const privateKey = getWorkProofPrivateKey();
   const message = Buffer.from(canonicalJson(payload), 'utf8');
   const signature = sign(null, message, privateKey);
   return { signature_base64: signature.toString('base64') };

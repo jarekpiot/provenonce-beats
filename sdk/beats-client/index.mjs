@@ -530,5 +530,141 @@ export function createBeatsClient({
         return null;
       }
     },
+
+    // ---- Work Proof ----
+
+    /**
+     * Submit a work proof to the Beats service and receive a signed receipt.
+     *
+     * @param {object} proof
+     *   @param {number}   proof.from_beat      Starting beat index
+     *   @param {number}   proof.to_beat        Ending beat index
+     *   @param {string}   proof.from_hash      Hash at from_beat (64 hex)
+     *   @param {string}   proof.to_hash        Hash at to_beat (64 hex)
+     *   @param {number}   proof.beats_computed to_beat - from_beat
+     *   @param {number}   proof.difficulty     Hash iterations per beat
+     *   @param {number}   proof.anchor_index   Global anchor index woven in
+     *   @param {string}   [proof.anchor_hash]  Anchor hash woven in (64 hex)
+     *   @param {Array}    proof.spot_checks    Spot-checked beats for verification
+     *     @param {number}  .index              Beat index
+     *     @param {string}  .hash               Hash at this beat (64 hex)
+     *     @param {string}  .prev               Previous hash (64 hex)
+     *     @param {string}  [.nonce]            Optional nonce
+     *
+     * @returns {Promise<WorkProofResponse>}
+     */
+    submitWorkProof(proof) {
+      return request('/api/v1/beat/work-proof', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(proof),
+      });
+    },
+
+    /**
+     * Verify a work-proof receipt signature (offline).
+     * Uses the work_proof key from GET /api/v1/beat/key, not the timestamp key.
+     *
+     * @param {object} receiptResponse  The full response from submitWorkProof()
+     * @param {object} [opts]
+     *   @param {string} [opts.publicKey]  Override: hex or base58 work-proof public key
+     */
+    async verifyWorkProofReceipt(receiptResponse, opts = {}) {
+      const payload = receiptResponse?.receipt;
+      const signature = receiptResponse?.signature;
+      if (!payload || !signature) return false;
+
+      // Resolve work-proof public key: param > cached from /key endpoint
+      let key = opts.publicKey;
+      if (!key) {
+        try {
+          const keyData = await this.getKey();
+          key = keyData?.keys?.work_proof?.public_key_hex ||
+                keyData?.keys?.work_proof?.public_key_base58;
+        } catch {
+          return false;
+        }
+      }
+      if (!key) return false;
+
+      try {
+        return await verifyEd25519(payload, signature, key);
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+// ============ STANDALONE COMPUTE (Node.js only) ============
+
+/**
+ * Compute a single beat — sequential SHA-256 hash chain.
+ *
+ * Each beat requires `difficulty` sequential hash iterations.
+ * Because SHA-256 output feeds the next input, this cannot be
+ * parallelized. This is the CPU-work primitive for local beat chains.
+ *
+ * Node.js only: uses node:crypto. Not available in browser environments.
+ *
+ * @param {string}  prevHash    Previous beat hash (64 hex)
+ * @param {number}  beatIndex   Beat index (monotonically increasing)
+ * @param {number}  [difficulty=1000]  Hash iterations per beat
+ * @param {string}  [nonce]     Optional entropy
+ * @param {string}  [anchorHash]  Global anchor hash to weave in
+ * @returns {{ index, hash, prev, timestamp, nonce?, anchor_hash? }}
+ */
+export async function computeBeat(prevHash, beatIndex, difficulty = 1000, nonce, anchorHash) {
+  if (typeof prevHash !== 'string' || prevHash.length === 0) {
+    throw new Error('computeBeat: prevHash must be a non-empty string');
+  }
+  if (!Number.isInteger(beatIndex) || beatIndex < 0) {
+    throw new Error('computeBeat: beatIndex must be a non-negative integer');
+  }
+  const d = Math.max(1, Math.min(Number.isFinite(difficulty) ? Math.floor(difficulty) : 1000, 1_000_000));
+
+  const { createHash } = await import('node:crypto');
+
+  const seed = anchorHash
+    ? `${prevHash}:${beatIndex}:${nonce || ''}:${anchorHash}`
+    : `${prevHash}:${beatIndex}:${nonce || ''}`;
+
+  let current = createHash('sha256').update(seed, 'utf8').digest('hex');
+  for (let i = 0; i < d; i++) {
+    current = createHash('sha256').update(current, 'utf8').digest('hex');
+  }
+
+  return {
+    index: beatIndex,
+    hash: current,
+    prev: prevHash,
+    timestamp: Date.now(),
+    nonce,
+    anchor_hash: anchorHash,
+  };
+}
+
+/**
+ * Compute the genesis beat for a local chain.
+ * Deterministic from caller-provided seed + optional domain prefix.
+ *
+ * Node.js only.
+ *
+ * @param {string} seed          Unique identifier for this chain (e.g. agent hash)
+ * @param {string} [domainPrefix='beats:genesis:v1:']  Namespace prefix
+ */
+export async function createGenesisBeat(seed, domainPrefix = 'beats:genesis:v1:') {
+  if (!seed || typeof seed !== 'string') {
+    throw new Error('createGenesisBeat: seed must be a non-empty string');
+  }
+  const { createHash } = await import('node:crypto');
+  const genesisHash = createHash('sha256')
+    .update(`${domainPrefix}${seed}`, 'utf8')
+    .digest('hex');
+  return {
+    index: 0,
+    hash: genesisHash,
+    prev: '0'.repeat(64),
+    timestamp: Date.now(),
   };
 }

@@ -117,10 +117,78 @@ export interface VerifyApiResponse {
   [key: string]: unknown;
 }
 
+export interface BeatObject {
+  index: number;
+  hash: string;
+  prev: string;
+  timestamp: number;
+  nonce?: string;
+  anchor_hash?: string;
+}
+
+export interface SpotCheck {
+  index: number;
+  hash: string;
+  prev: string;
+  nonce?: string;
+}
+
+export interface WorkProofRequest {
+  from_beat: number;
+  to_beat: number;
+  from_hash: string;
+  to_hash: string;
+  beats_computed: number;
+  difficulty: number;
+  anchor_index: number;
+  anchor_hash?: string;
+  spot_checks: SpotCheck[];
+}
+
+export interface WorkProofReceiptPayload {
+  type: 'work_proof';
+  beats_verified: number;
+  difficulty: number;
+  anchor_index: number;
+  anchor_hash: string | null;
+  utc: number;
+}
+
+export interface WorkProofResponse {
+  ok: boolean;
+  valid: boolean;
+  receipt?: WorkProofReceiptPayload;
+  signature?: string;
+  public_key?: string;
+  spot_checks_verified?: number;
+  reason?: string;
+  failed_indices?: number[];
+  _note?: string;
+}
+
+export interface KeyInfo {
+  public_key_base58: string;
+  public_key_hex: string;
+  signing_context: string;
+  purpose: string;
+}
+
+export interface KeyResponse {
+  /** Timestamp receipt key (backward compat) */
+  public_key_base58: string;
+  public_key_hex: string;
+  algorithm: string;
+  keys: {
+    timestamp: KeyInfo;
+    work_proof: KeyInfo;
+  };
+  _note?: string;
+}
+
 export interface BeatsClient {
   getHealth(): Promise<HealthResponse>;
   getAnchor(opts?: AnchorOptions): Promise<AnchorResponse>;
-  getKey(): Promise<{ public_key_base58: string; public_key_hex: string; algorithm: string; purpose?: string; _note?: string }>;
+  getKey(): Promise<KeyResponse>;
   verify(payload: unknown): Promise<VerifyApiResponse>;
   timestampHash(hash: string): Promise<TimestampResponse>;
 
@@ -143,8 +211,57 @@ export interface BeatsClient {
   /** Returns true if chain continuity is broken and resync() is required. */
   isBroken(): boolean;
 
+  /**
+   * Submit a work proof to the Beats service and receive a signed receipt.
+   * The receipt certifies N beats at difficulty D anchored to a global beat.
+   * Policy-free: the caller (Registry or any consumer) decides what N means.
+   */
+  submitWorkProof(proof: WorkProofRequest): Promise<WorkProofResponse>;
+
+  /**
+   * Verify a work-proof receipt signature offline.
+   * Uses the work_proof key from GET /api/v1/beat/key (distinct from timestamp key).
+   */
+  verifyWorkProofReceipt(
+    receiptResponse: WorkProofResponse,
+    opts?: { publicKey?: string },
+  ): Promise<boolean>;
+
   /** Internal: resolve public key from cache or auto-fetch. */
   _resolveKey(): Promise<string | null>;
 }
 
 export declare function createBeatsClient(options?: BeatsClientOptions): BeatsClient;
+
+// ============ STANDALONE COMPUTE (Node.js only) ============
+
+/**
+ * Compute a single beat — sequential SHA-256 hash chain.
+ * Node.js only (uses node:crypto). Not browser-compatible.
+ *
+ * @param prevHash    Previous beat hash (64 hex)
+ * @param beatIndex   Beat index (monotonically increasing)
+ * @param difficulty  Hash iterations per beat (default 1000)
+ * @param nonce       Optional entropy
+ * @param anchorHash  Optional global anchor hash to weave in
+ */
+export declare function computeBeat(
+  prevHash: string,
+  beatIndex: number,
+  difficulty?: number,
+  nonce?: string,
+  anchorHash?: string,
+): Promise<BeatObject>;
+
+/**
+ * Compute the genesis beat for a local chain.
+ * Deterministic from caller-provided seed + domain prefix.
+ * Node.js only.
+ *
+ * @param seed          Unique identifier (e.g. agent hash)
+ * @param domainPrefix  Namespace prefix (default: 'beats:genesis:v1:')
+ */
+export declare function createGenesisBeat(
+  seed: string,
+  domainPrefix?: string,
+): Promise<BeatObject>;
