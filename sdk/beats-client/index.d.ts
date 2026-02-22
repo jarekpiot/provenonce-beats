@@ -257,6 +257,158 @@ export interface BeatsClient {
 
 export declare function createBeatsClient(options?: BeatsClientOptions): BeatsClient;
 
+// ============ LOCAL BEAT CHAIN ============
+
+/** Expected beats per global anchor interval. Used by detectGap() and computeCatchup(). */
+export declare const BEATS_PER_ANCHOR: 100;
+
+/** Maximum beats to compute in a single Re-Sync Challenge (D-72). */
+export declare const MAX_RESYNC_BEATS: 10000;
+
+export interface LocalBeatChainOptions {
+  /** Unique identifier for this chain (e.g. agent hash). Required. */
+  seed: string;
+  /** Hash iterations per beat. Default: 1000. */
+  difficulty?: number;
+  /** Genesis domain prefix. Default: 'beats:genesis:v1:' */
+  domainPrefix?: string;
+  /** Initial global anchor index. Default: 0. */
+  anchorIndex?: number;
+  /** Initial anchor hash to weave into beats. */
+  anchorHash?: string | null;
+  /** Max beats to keep in memory. Default: 500. */
+  maxHistory?: number;
+}
+
+export interface ChainEntry {
+  index: number;
+  hash: string;
+  prev: string;
+  anchor_hash: string | null;
+}
+
+export interface ChainState {
+  seed: string;
+  difficulty: number;
+  domainPrefix: string;
+  genesis: ChainEntry;
+  head: ChainEntry;
+  beatCount: number;
+  anchorIndex: number;
+  anchorHash: string | null;
+  maxHistory: number;
+  lastUpdated: number;
+}
+
+export interface PersistedChainState extends ChainState {
+  history: ChainEntry[];
+}
+
+export interface GapInfo {
+  /** Number of global anchor intervals missed. */
+  gap_anchors: number;
+  /** Beats needed for Re-Sync Challenge: min(gap_anchors * BEATS_PER_ANCHOR, MAX_RESYNC_BEATS). */
+  gap_beats_needed: number;
+  /** Last anchor index seen by this chain. */
+  last_anchor_index: number;
+}
+
+export interface AutoAdvanceOptions {
+  /** Milliseconds between advances. Default: 1000. */
+  intervalMs?: number;
+  /** Called with (beat, state) after each successful advance. */
+  onAdvance?: (beat: ChainEntry, state: ChainState) => void;
+  /** Called with (error) on advance failure. */
+  onError?: (error: Error) => void;
+}
+
+/**
+ * Agent-side sequential SHA-256 hash chain.
+ *
+ * Computes beats locally (no network required). Each beat is one sequential
+ * SHA-256 hash chain of `difficulty` iterations.
+ *
+ * Node.js only (uses node:crypto via computeBeat).
+ */
+export declare class LocalBeatChain {
+  /**
+   * Create a new LocalBeatChain from a seed string.
+   * The genesis beat is deterministic from seed + domainPrefix.
+   */
+  static create(opts: LocalBeatChainOptions): Promise<LocalBeatChain>;
+
+  /**
+   * Restore a LocalBeatChain from a persisted state object.
+   * Pass the result of JSON.parse(chain.persist()).
+   */
+  static restore(state: PersistedChainState): Promise<LocalBeatChain>;
+
+  /** Compute and append the next beat to the chain. */
+  advance(): Promise<ChainEntry>;
+
+  /**
+   * Build a WorkProofRequest from the current history window.
+   * Genesis beat is excluded (different hash formula).
+   *
+   * @param lo           Min beat index to include (inclusive)
+   * @param hi           Max beat index to include (inclusive)
+   * @param spotCheckCount Number of spot checks to sample (default: 5)
+   */
+  getProof(lo?: number, hi?: number, spotCheckCount?: number): WorkProofRequest;
+
+  /**
+   * Detect gap between current anchor and a newer global anchor index.
+   * Use result.gap_beats_needed to decide whether to run computeCatchup().
+   */
+  detectGap(currentAnchorIndex: number): GapInfo;
+
+  /**
+   * Compute catch-up beats after a gap (Re-Sync Challenge, D-72).
+   * Returns the number of beats computed.
+   */
+  computeCatchup(anchorIndex: number, anchorHash?: string | null): Promise<number>;
+
+  /**
+   * Update the anchor reference without computing catch-up beats.
+   * Future calls to advance() will weave in the new anchor hash.
+   */
+  setAnchorIndex(anchorIndex: number, anchorHash?: string | null): void;
+
+  /**
+   * Trim history to the most recent N beats.
+   * Does not affect beatCount or head.
+   */
+  clearHistory(keepLast?: number): void;
+
+  /**
+   * Serialize chain state + history to a JSON string.
+   * Restore with: LocalBeatChain.restore(JSON.parse(chain.persist()))
+   */
+  persist(): string;
+
+  /** Get current chain state (without full history). */
+  getState(): ChainState;
+
+  /** Start auto-advancing the chain on a timer. */
+  startAutoAdvance(opts?: AutoAdvanceOptions): void;
+
+  /** Stop auto-advancing. */
+  stopAutoAdvance(): void;
+
+  // Read-only getters
+  readonly head: ChainEntry;
+  readonly genesis: ChainEntry;
+  /** Total beats computed (not counting the genesis beat). */
+  readonly beatCount: number;
+  readonly difficulty: number;
+  readonly anchorIndex: number;
+  readonly anchorHash: string | null;
+  readonly seed: string;
+  readonly domainPrefix: string;
+  /** Number of beats currently in memory history. */
+  readonly historyLength: number;
+}
+
 // ============ STANDALONE COMPUTE (Node.js only) ============
 
 /**

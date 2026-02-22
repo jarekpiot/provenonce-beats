@@ -606,6 +606,345 @@ export function createBeatsClient({
   };
 }
 
+// ============ LOCAL BEAT CHAIN ============
+
+export const BEATS_PER_ANCHOR = 100;
+export const MAX_RESYNC_BEATS = 10_000;
+
+function sampleEvenly(arr, count) {
+  if (count <= 0 || arr.length === 0) return [];
+  if (count >= arr.length) return [...arr];
+  if (count === 1) return [arr[Math.floor(arr.length / 2)]];
+  const result = [];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(i * (arr.length - 1) / (count - 1));
+    result.push(arr[idx]);
+  }
+  return result;
+}
+
+/**
+ * LocalBeatChain — agent-side sequential SHA-256 hash chain.
+ *
+ * Computes beats locally (no network required). Each beat is one sequential
+ * SHA-256 hash chain of `difficulty` iterations. The chain anchors to global
+ * Beats service anchors via anchor hash weaving.
+ *
+ * Usage:
+ *   const chain = await LocalBeatChain.create({ seed: 'my-agent-id' });
+ *   await chain.advance();
+ *   const proof = chain.getProof();
+ *   const result = await beats.submitWorkProof(proof);
+ *
+ * Node.js only (uses node:crypto via computeBeat).
+ */
+export class LocalBeatChain {
+  #seed;
+  #difficulty;
+  #domainPrefix;
+  #head;
+  #genesis;
+  #beatCount;
+  #history;     // Array<{ index, hash, prev, anchor_hash }>
+  #anchorIndex;
+  #anchorHash;
+  #maxHistory;
+  #autoHandle;
+  #autoRunning;
+
+  constructor(genesis, opts = {}) {
+    const {
+      seed,
+      difficulty = 1000,
+      domainPrefix = 'beats:genesis:v1:',
+      anchorIndex = 0,
+      anchorHash = null,
+      maxHistory = 500,
+    } = opts;
+
+    this.#seed = seed || genesis.hash;
+    this.#difficulty = difficulty;
+    this.#domainPrefix = domainPrefix;
+    this.#anchorIndex = anchorIndex;
+    this.#anchorHash = anchorHash;
+    this.#maxHistory = maxHistory;
+    this.#genesis = { index: genesis.index, hash: genesis.hash, prev: genesis.prev, anchor_hash: genesis.anchor_hash ?? null };
+    this.#head = { ...this.#genesis };
+    this.#beatCount = 0;
+    this.#history = [{ ...this.#genesis }];
+    this.#autoHandle = null;
+    this.#autoRunning = false;
+  }
+
+  /**
+   * Create a new LocalBeatChain from a seed string.
+   * The genesis beat is deterministic from seed + domainPrefix.
+   *
+   * @param {object} opts
+   *   @param {string} opts.seed            Unique identifier for this chain (e.g. agent hash)
+   *   @param {number} [opts.difficulty=1000]  Hash iterations per beat
+   *   @param {string} [opts.domainPrefix]  Genesis domain prefix (default: 'beats:genesis:v1:')
+   *   @param {number} [opts.anchorIndex=0] Initial global anchor index
+   *   @param {string} [opts.anchorHash]    Initial anchor hash to weave in
+   *   @param {number} [opts.maxHistory=500] Max beats to keep in memory
+   */
+  static async create({
+    seed,
+    difficulty = 1000,
+    domainPrefix = 'beats:genesis:v1:',
+    anchorIndex = 0,
+    anchorHash = null,
+    maxHistory = 500,
+  } = {}) {
+    if (!seed || typeof seed !== 'string') {
+      throw new Error('LocalBeatChain.create: seed must be a non-empty string');
+    }
+    const genesis = await createGenesisBeat(seed, domainPrefix);
+    return new LocalBeatChain(genesis, { seed, difficulty, domainPrefix, anchorIndex, anchorHash, maxHistory });
+  }
+
+  /**
+   * Restore a LocalBeatChain from a persisted state object.
+   * Pass the result of JSON.parse(chain.persist()).
+   *
+   * @param {object} state  Previously persisted state
+   */
+  static async restore(state) {
+    if (!state || !state.seed || !state.genesis || !state.head) {
+      throw new Error('LocalBeatChain.restore: invalid state — must include seed, genesis, and head');
+    }
+    const chain = new LocalBeatChain(state.genesis, {
+      seed: state.seed,
+      difficulty: state.difficulty ?? 1000,
+      domainPrefix: state.domainPrefix ?? 'beats:genesis:v1:',
+      anchorIndex: state.anchorIndex ?? 0,
+      anchorHash: state.anchorHash ?? null,
+      maxHistory: state.maxHistory ?? 500,
+    });
+    chain.#head = { ...state.head };
+    chain.#beatCount = state.beatCount ?? 0;
+    chain.#history = Array.isArray(state.history)
+      ? state.history.map(b => ({ ...b }))
+      : [{ ...state.head }];
+    return chain;
+  }
+
+  /**
+   * Compute and append the next beat to the chain.
+   * Weaves in the current anchor hash if set.
+   *
+   * @returns {Promise<{ index, hash, prev, anchor_hash }>}
+   */
+  async advance() {
+    const nextIndex = this.#head.index + 1;
+    const beat = await computeBeat(
+      this.#head.hash,
+      nextIndex,
+      this.#difficulty,
+      undefined,
+      this.#anchorHash ?? undefined,
+    );
+    const entry = {
+      index: beat.index,
+      hash: beat.hash,
+      prev: beat.prev,
+      anchor_hash: beat.anchor_hash ?? null,
+    };
+    this.#head = { ...entry };
+    this.#history.push(entry);
+    this.#beatCount++;
+    if (this.#history.length > this.#maxHistory) {
+      this.#history = this.#history.slice(this.#history.length - this.#maxHistory);
+    }
+    return { ...this.#head };
+  }
+
+  /**
+   * Build a WorkProofRequest from the current history window.
+   *
+   * The genesis beat (index 0) is never included in spot_checks because it
+   * uses a different hash formula than compute beats (1, 2, 3...).
+   *
+   * @param {number} [lo]              Min beat index to include (inclusive)
+   * @param {number} [hi]              Max beat index to include (inclusive)
+   * @param {number} [spotCheckCount=5] Number of spot checks to sample
+   * @returns {WorkProofRequest}
+   */
+  getProof(lo, hi, spotCheckCount = 5) {
+    // Skip genesis beat — it uses a different formula and cannot be server-verified
+    const genesisIndex = this.#genesis.index;
+    const workBeats = this.#history.filter(b => {
+      if (b.index === genesisIndex) return false;
+      if (lo !== undefined && b.index < lo) return false;
+      if (hi !== undefined && b.index > hi) return false;
+      return true;
+    });
+
+    if (workBeats.length === 0) {
+      throw new Error('LocalBeatChain.getProof: no work beats in history — call advance() first');
+    }
+
+    const first = workBeats[0];
+    const last = workBeats[workBeats.length - 1];
+    const count = Math.max(1, Math.min(spotCheckCount, workBeats.length));
+
+    const sampled = sampleEvenly(workBeats, count);
+    const seen = new Set();
+    const spot_checks = [];
+    for (const b of sampled) {
+      if (!seen.has(b.index)) {
+        seen.add(b.index);
+        spot_checks.push({ index: b.index, hash: b.hash, prev: b.prev });
+      }
+    }
+
+    const proof = {
+      from_hash: first.prev,
+      to_hash: last.hash,
+      beats_computed: last.index - first.index + 1,
+      difficulty: this.#difficulty,
+      anchor_index: this.#anchorIndex,
+      spot_checks,
+    };
+    if (this.#anchorHash) proof.anchor_hash = this.#anchorHash;
+    return proof;
+  }
+
+  /**
+   * Detect gap between current anchor and a newer global anchor.
+   *
+   * @param {number} currentAnchorIndex  Latest global anchor index from Beats service
+   * @returns {{ gap_anchors, gap_beats_needed, last_anchor_index }}
+   */
+  detectGap(currentAnchorIndex) {
+    const gap_anchors = Math.max(0, currentAnchorIndex - this.#anchorIndex);
+    const gap_beats_needed = Math.min(gap_anchors * BEATS_PER_ANCHOR, MAX_RESYNC_BEATS);
+    return { gap_anchors, gap_beats_needed, last_anchor_index: this.#anchorIndex };
+  }
+
+  /**
+   * Compute catch-up beats after a gap (Re-Sync Challenge, D-72).
+   *
+   * Computes min(gap_anchors * BEATS_PER_ANCHOR, MAX_RESYNC_BEATS) beats
+   * using the new anchor hash.
+   *
+   * @param {number} anchorIndex  New global anchor index
+   * @param {string} [anchorHash] New anchor hash to weave in
+   * @returns {Promise<number>}   Number of beats computed
+   */
+  async computeCatchup(anchorIndex, anchorHash = null) {
+    const { gap_beats_needed } = this.detectGap(anchorIndex);
+    this.#anchorIndex = anchorIndex;
+    this.#anchorHash = anchorHash;
+    for (let i = 0; i < gap_beats_needed; i++) {
+      await this.advance();
+    }
+    return gap_beats_needed;
+  }
+
+  /**
+   * Update the anchor reference without computing catch-up beats.
+   * Use this when you want to start weaving a new anchor immediately.
+   *
+   * @param {number} anchorIndex  Global anchor index
+   * @param {string} [anchorHash] Anchor hash to weave into future beats
+   */
+  setAnchorIndex(anchorIndex, anchorHash = null) {
+    if (!Number.isInteger(anchorIndex) || anchorIndex < 0) {
+      throw new Error('LocalBeatChain.setAnchorIndex: anchorIndex must be a non-negative integer');
+    }
+    this.#anchorIndex = anchorIndex;
+    this.#anchorHash = anchorHash;
+  }
+
+  /**
+   * Trim history to the most recent N beats.
+   * Useful for long-running agents to bound memory usage.
+   *
+   * @param {number} [keepLast=100]  Number of recent beats to retain
+   */
+  clearHistory(keepLast = 100) {
+    if (this.#history.length > keepLast) {
+      this.#history = this.#history.slice(this.#history.length - keepLast);
+    }
+  }
+
+  /**
+   * Serialize chain state to a JSON string for persistence.
+   * Restore with: LocalBeatChain.restore(JSON.parse(chain.persist()))
+   */
+  persist() {
+    const state = this.getState();
+    state.history = this.#history.map(b => ({ ...b }));
+    return JSON.stringify(state);
+  }
+
+  /**
+   * Get current chain state (without full history).
+   * Use persist() to include history for restore.
+   */
+  getState() {
+    return {
+      seed: this.#seed,
+      difficulty: this.#difficulty,
+      domainPrefix: this.#domainPrefix,
+      genesis: { ...this.#genesis },
+      head: { ...this.#head },
+      beatCount: this.#beatCount,
+      anchorIndex: this.#anchorIndex,
+      anchorHash: this.#anchorHash,
+      maxHistory: this.#maxHistory,
+      lastUpdated: Date.now(),
+    };
+  }
+
+  /**
+   * Start auto-advancing the chain on a timer.
+   *
+   * @param {object} opts
+   *   @param {number} [opts.intervalMs=1000]  Milliseconds between advances
+   *   @param {function} [opts.onAdvance]      Called with (beat, state) after each advance
+   *   @param {function} [opts.onError]        Called with (err) on advance failure
+   */
+  startAutoAdvance({ intervalMs = 1000, onAdvance = null, onError = null } = {}) {
+    this.stopAutoAdvance();
+    this.#autoRunning = true;
+    const tick = async () => {
+      if (!this.#autoRunning) return;
+      try {
+        const beat = await this.advance();
+        if (typeof onAdvance === 'function') onAdvance(beat, this.getState());
+      } catch (err) {
+        if (typeof onError === 'function') onError(err);
+      }
+      if (this.#autoRunning) {
+        this.#autoHandle = setTimeout(tick, intervalMs);
+      }
+    };
+    this.#autoHandle = setTimeout(tick, intervalMs);
+  }
+
+  /** Stop auto-advancing. */
+  stopAutoAdvance() {
+    this.#autoRunning = false;
+    if (this.#autoHandle !== null) {
+      clearTimeout(this.#autoHandle);
+      this.#autoHandle = null;
+    }
+  }
+
+  // ---- Read-only getters ----
+  get head() { return { ...this.#head }; }
+  get genesis() { return { ...this.#genesis }; }
+  get beatCount() { return this.#beatCount; }
+  get difficulty() { return this.#difficulty; }
+  get anchorIndex() { return this.#anchorIndex; }
+  get anchorHash() { return this.#anchorHash; }
+  get seed() { return this.#seed; }
+  get domainPrefix() { return this.#domainPrefix; }
+  get historyLength() { return this.#history.length; }
+}
+
 // ============ STANDALONE COMPUTE (Node.js only) ============
 
 /**
